@@ -44,7 +44,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
         return
     ws.state.user = user
 
-    await ws_manager.connect(ws)
+    await ws_manager.connect(user.id, ws)
     try:
         # Send initial contacts list
         async with SessionLocal() as db:
@@ -64,10 +64,10 @@ async def ws_endpoint(ws: WebSocket) -> None:
         await ws.send_text(json.dumps({"type": "contacts:init", "contacts": contacts}))
 
         while True:
-            # keepalive / optional client messages later
+            
             await ws.receive_text()
 
     except WebSocketDisconnect:
         pass
     finally:
-        await ws_manager.disconnect(ws)
+        await ws_manager.disconnect(user.id, ws)

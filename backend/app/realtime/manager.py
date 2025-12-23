@@ -7,24 +7,29 @@ from fastapi import WebSocket
 
 class WebSocketManager:
     def __init__(self) -> None:
-        self._clients: set[WebSocket] = set()
         self._lock = asyncio.Lock()
+        self._by_user: dict[int, set[WebSocket]] = {}
 
-    async def connect(self, ws: WebSocket) -> None:
+    async def connect(self, ws: WebSocket, user_id: int) -> None:
         await ws.accept()
         async with self._lock:
-            self._clients.add(ws)
+            if user_id not in self._by_user:
+                self._by_user[user_id] = set()
+            self._by_user.setdefault(user_id, set()).add(ws)
 
-    async def disconnect(self, ws: WebSocket) -> None:
+    async def disconnect(self, user_id: int, ws: WebSocket) -> None:
         async with self._lock:
-            self._clients.discard(ws)
+            if user_id in self._by_user:
+                self._by_user[user_id].discard(ws)
+                if not self._by_user[user_id]:
+                    self._by_user.pop(user_id, None)
 
-    async def broadcast(self, event: dict[str, Any]) -> None:
+    async def broadcast_to_user(self, user_id: int, event: dict[str, Any]) -> None:
         message = json.dumps(event, ensure_ascii=False)
         async with self._lock:
-            clients = list(self._clients)
+            clients = list(self._by_user.get(user_id, set()))
 
-        # Send outside lock; if a client is dead, ignore and remove later.
+        
         dead: list[WebSocket] = []
         for ws in clients:
             try:
@@ -34,8 +39,10 @@ class WebSocketManager:
 
         if dead:
             async with self._lock:
-                for ws in dead:
-                    self._clients.discard(ws)
+                s = self._by_user.get(user_id)
+                if s:
+                    for ws in dead:
+                        s.discard(ws)
 
 
 ws_manager = WebSocketManager()
