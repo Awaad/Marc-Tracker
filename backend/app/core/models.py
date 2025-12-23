@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Literal, Optional, Any
 
 from pydantic import BaseModel, Field
 
@@ -52,6 +52,8 @@ class ContactCreate(BaseModel):
     target: str = Field(..., description="Platform-specific target identifier")
     display_name: str = ""
     display_number: str = ""
+    avatar_url: str | None = None
+    platform_meta: dict[str, Any] = {}
 
 
 class Contact(BaseModel):
@@ -60,6 +62,8 @@ class Contact(BaseModel):
     target: str
     display_name: str = ""
     display_number: str = ""
+    avatar_url: str | None = None
+    platform_meta: dict[str, Any] = {}
     capabilities: Capabilities
 
 

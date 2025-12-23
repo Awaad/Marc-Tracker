@@ -1,4 +1,4 @@
-from sqlalchemy import String, Integer, Float, ForeignKey
+from sqlalchemy import String, Integer, Float, ForeignKey, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -25,6 +25,8 @@ class Contact(Base):
     target: Mapped[str] = mapped_column(String(256))
     display_name: Mapped[str] = mapped_column(String(256), default="")
     display_number: Mapped[str] = mapped_column(String(64), default="")
+    avatar_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    platform_meta_json: Mapped[str] = mapped_column(Text, default="{}")
 
     user: Mapped["User"] = relationship()
 

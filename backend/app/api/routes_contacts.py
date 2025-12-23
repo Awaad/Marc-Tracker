@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+import json
 
 from app.auth.deps import get_current_user, get_db
 from app.core.models import ContactCreate
@@ -42,6 +43,8 @@ async def create_contact(
         target=payload.target,
         display_name=payload.display_name,
         display_number=payload.display_number,
+        avatar_url=payload.avatar_url,
+        platform_meta_json=json.dumps(payload.platform_meta or {}, ensure_ascii=False),
     )
     db.add(c)
     await db.commit()
@@ -53,6 +56,7 @@ async def create_contact(
         target=c.target,
         display_name=c.display_name or "",
         display_number=c.display_number or "",
+        platform_meta=json.loads(c.platform_meta_json or "{}"),
         capabilities=capabilities_for(payload.platform),
     )
 
