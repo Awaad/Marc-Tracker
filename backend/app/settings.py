@@ -9,5 +9,7 @@ class Settings(BaseSettings):
     env: str = "dev"
     cors_allow_origins: str = "*"  
 
+    database_url: str = "sqlite+aiosqlite:///./activity_tracker.db"
+
 
 settings = Settings()
