@@ -3,17 +3,14 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.deps import get_current_user, get_db
 from app.auth.security import create_access_token, hash_password, verify_password
 from app.db.models import User
-from app.db.session import SessionLocal
+
 from app.settings import settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-
-async def get_db() -> AsyncSession:
-    async with SessionLocal() as session:
-        yield session
 
 
 class RegisterIn(BaseModel):
@@ -37,6 +34,11 @@ class TokenOut(BaseModel):
     token_type: str = "bearer"
 
 
+class MeOut(BaseModel):
+    id: int
+    email: EmailStr
+    user_name: str
+
 @router.post("/register", response_model=TokenOut)
 async def register(payload: RegisterIn, db: AsyncSession = Depends(get_db)) -> TokenOut:
     # Check email uniqueness
@@ -56,9 +58,9 @@ async def register(payload: RegisterIn, db: AsyncSession = Depends(get_db)) -> T
     )
     db.add(user)
     await db.commit()
+    await db.refresh(user)
 
-    # JWT subject: use stable user id string once we add /auth/me; for now user_name is fine
-    token = create_access_token(subject=payload.user_name, expires_minutes=settings.jwt_expires_minutes)
+    token = create_access_token(subject=str(user.id), expires_minutes=settings.jwt_expires_minutes)
     return TokenOut(access_token=token)
 
 
@@ -70,5 +72,10 @@ async def login(payload: LoginIn, db: AsyncSession = Depends(get_db)) -> TokenOu
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    token = create_access_token(subject=user.user_name, expires_minutes=settings.jwt_expires_minutes)
+    token = create_access_token(subject=str(user.id), expires_minutes=settings.jwt_expires_minutes)
     return TokenOut(access_token=token)
+
+
+@router.get("/me", response_model=MeOut)
+async def me(user: User = Depends(get_current_user)) -> MeOut:
+    return MeOut(id=user.id, email=user.email, user_name=user.user_name)

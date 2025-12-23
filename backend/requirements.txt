@@ -4,5 +4,6 @@ pydantic
 sqlalchemy
 aiosqlite
 pydantic-settings
+pydantic[email]
 python-jose[cryptography]
 passlib[bcrypt]
