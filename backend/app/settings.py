@@ -11,5 +11,9 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite+aiosqlite:///./activity_tracker.db"
 
+    jwt_secret: str = "FROM_ENV"
+    jwt_algorithm: str = "HS256"
+    jwt_expires_minutes: int = 60 
+
 
 settings = Settings()
