@@ -6,5 +6,6 @@ aiosqlite
 pydantic-settings
 pydantic[email]
 python-jose[cryptography]
-passlib[bcrypt]
+passlib[argon2]
+argon2-cffi
 alembic
