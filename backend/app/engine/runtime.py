@@ -3,6 +3,10 @@ import logging
 
 from app.engine.bus import EventBus
 from app.engine.tracking_manager import TrackingManager
+from app.engine.classifier import ClassifierV1
+from app.engine.correlator import Correlator
+from app.storage.points_repo import TrackerPointsRepo
+
 
 log = logging.getLogger("app.engine")
 
@@ -11,6 +15,10 @@ class EngineRuntime:
     def __init__(self) -> None:
         self.bus: EventBus[object] = EventBus()
         self.tracking: TrackingManager = TrackingManager(self.bus)
+
+        self.classifier = ClassifierV1()
+        self.correlator = Correlator(self.classifier)
+        self.points_repo = TrackerPointsRepo()
 
         self._consumer_task: asyncio.Task[None] | None = None
 
