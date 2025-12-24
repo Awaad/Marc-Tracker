@@ -24,6 +24,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
+        swagger_ui_parameters={"persistAuthorization": True},
     )
 
     app.add_middleware(RequestIdMiddleware)
