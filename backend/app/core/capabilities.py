@@ -31,4 +31,6 @@ class Capabilities(dict):
             # Telegram Bot API has no delivered/read receipts; MTProto can provide some read signals
             # depending on chat type. We'll start conservative and upgrade if MTProto adapter is used.
             return Capabilities(delivery_receipts=False, read_receipts=False, presence=False)
+        if platform == Platform.mock:
+            return Capabilities(delivery_receipts=True)
         return Capabilities(delivery_receipts=False, read_receipts=False, presence=False)

@@ -26,6 +26,8 @@ def capabilities_for(platform: Platform) -> Capabilities:
         return Capabilities(delivery_receipts=True)
     if platform == Platform.telegram:
         return Capabilities()  # bot API doesn't support delivered/read
+    if platform == Platform.mock:
+        return Capabilities(delivery_receipts=True)
     return Capabilities()
 
 

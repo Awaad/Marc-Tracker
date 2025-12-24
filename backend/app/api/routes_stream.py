@@ -17,7 +17,7 @@ router = APIRouter(tags=["stream"])
 async def _auth_ws_and_load_user(ws: WebSocket) -> User:
     token = ws.query_params.get("token")
     if not token:
-        await ws.close(code=1008)
+        await ws.close(code=1008, reason="missing token")
         raise RuntimeError("No token")
 
     try:
@@ -25,19 +25,21 @@ async def _auth_ws_and_load_user(ws: WebSocket) -> User:
         sub = payload.get("sub")
         user_id = int(sub)
     except (JWTError, TypeError, ValueError):
-        await ws.close(code=1008)
+        await ws.close(code=1008, reason="bad token")
         raise RuntimeError("Bad token")
 
     async with SessionLocal() as db:
         user = await db.scalar(select(User).where(User.id == user_id))
         if not user:
-            await ws.close(code=1008)
+            await ws.close(code=1008, reason="user not found")
             raise RuntimeError("No user")
         return user
     
 
 @router.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
+    await ws.accept()
+    await ws.send_text(json.dumps({"type": "ws:direct-test", "ok": True}))
     try:
         user = await _auth_ws_and_load_user(ws)
     except RuntimeError:
@@ -45,6 +47,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
     ws.state.user = user
 
     await ws_manager.connect(user.id, ws)
+    await ws_manager.broadcast_to_user(user.id, {"type": "ws:broadcast-test", "ok": True})
     try:
         # Send initial contacts list
         async with SessionLocal() as db:

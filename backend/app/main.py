@@ -7,6 +7,7 @@ from app.api.router import api_router
 
 
 import logging
+import hashlib
 from app.logging_config import setup_logging
 
 from app.middleware.request_id import RequestIdMiddleware
@@ -46,6 +47,8 @@ app = create_app()
 
 @app.on_event("startup")
 async def _startup() -> None:
+    fp = hashlib.sha256(settings.jwt_secret.encode("utf-8")).hexdigest()[:8]
+    log.info("jwt config", extra={"jwt_alg": settings.jwt_algorithm, "jwt_secret_fp": fp})
     await engine_runtime.start()
 
 @app.on_event("shutdown")
