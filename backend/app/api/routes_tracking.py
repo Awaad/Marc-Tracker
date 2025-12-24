@@ -12,6 +12,9 @@ from app.adapters.mock import MockAdapter
 from app.db.session import SessionLocal
 from app.engine.runner import ContactRunner
 
+from app.adapters.hub import adapter_hub
+from app.core.capabilities import Platform
+
 
 router = APIRouter(prefix="/tracking", tags=["tracking"])
 
@@ -36,7 +39,11 @@ async def start_tracking(
     platform = contact.platform
 
     async def runner() -> None:
-        adapter = MockAdapter()
+        try:
+            adapter = adapter_hub.create(platform, user.id, contact.id)
+        except RuntimeError as e:
+            # log and stop quickly
+            raise RuntimeError(str(e))
         try:
             cr = ContactRunner(
                 adapter=adapter,
@@ -45,7 +52,7 @@ async def start_tracking(
                 db_factory=session_scope,
                 user_id=user.id,
                 contact_id=contact.id,
-                platform=platform,
+                platform=platform.value,
                 timeout_ms=10_000,
             )
             await cr.run()

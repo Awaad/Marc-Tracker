@@ -15,6 +15,9 @@ from app.middleware.access_log import AccessLogMiddleware
 
 from app.engine.runtime import engine_runtime
 
+from app.adapters.register import register_adapters
+from app.adapters.hub import adapter_hub
+
 
 setup_logging("INFO")
 log = logging.getLogger("app")
@@ -49,6 +52,8 @@ app = create_app()
 async def _startup() -> None:
     fp = hashlib.sha256(settings.jwt_secret.encode("utf-8")).hexdigest()[:8]
     log.info("jwt config", extra={"jwt_alg": settings.jwt_algorithm, "jwt_secret_fp": fp})
+    register_adapters()
+    await adapter_hub.init_all()
     await engine_runtime.start()
 
 @app.on_event("shutdown")
