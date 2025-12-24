@@ -60,3 +60,15 @@ async def start_tracking(
 async def stop_tracking(contact_id: int, user: User = Depends(get_current_user)) -> dict:
     await engine_runtime.tracking.stop(user.id, contact_id)
     return {"ok": True}
+
+
+@router.get("/running")
+async def running(user: User = Depends(get_current_user)) -> dict:
+    contact_ids = await engine_runtime.tracking.list_running(user.id)
+    return {"contact_ids": contact_ids}
+
+
+@router.get("/{contact_id}/status")
+async def status(contact_id: int, user: User = Depends(get_current_user)) -> dict:
+    is_running = await engine_runtime.tracking.is_running(user.id, contact_id)
+    return {"contact_id": contact_id, "running": is_running}

@@ -73,3 +73,19 @@ class TrackingManager:
             log.exception("tracking loop crashed", extra={"user_id": user_id, "contact_id": contact_id})
         finally:
             log.info("tracking loop ended", extra={"user_id": user_id, "contact_id": contact_id})
+
+        
+    async def is_running(self, user_id: int, contact_id: int) -> bool:
+        key = (user_id, contact_id)
+        async with self._lock:
+            task = self._tasks.get(key)
+            return bool(task and not task.done())
+
+
+    async def list_running(self, user_id: int) -> list[int]:
+        async with self._lock:
+            running: list[int] = []
+            for (uid, cid), task in self._tasks.items():
+                if uid == user_id and not task.done():
+                    running.append(cid)
+            return running
