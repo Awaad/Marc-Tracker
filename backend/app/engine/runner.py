@@ -61,9 +61,11 @@ class ContactRunner:
 
     async def _timeout_check(self, probe_id: str, sent_at_ms: int) -> None:
         await asyncio.sleep(self.timeout_ms / 1000)
-        # If still exists in correlator map, it timed out.
-        # We mark a synthetic device_id="primary" for now; adapters can refine device ids later.
-        # (For Signal/WhatsApp multi-device, adapter receipts will use real device_id.)
+
+        # only mark offline if probe is still pending
+        if not self.correlator.is_probe_pending(self.user_id, self.contact_id, probe_id):
+            return
+        
         result = self.correlator.mark_offline(self.user_id, self.contact_id, device_id="primary", timeout_ms=self.timeout_ms)
 
         med, thr = self.correlator.global_stats(self.user_id, self.contact_id)

@@ -6,7 +6,19 @@ from app.auth.deps import get_current_user, get_db
 from app.db.models import Contact as ContactOrm, User
 from app.engine.runtime import engine_runtime
 
+from contextlib import asynccontextmanager
+
+from app.adapters.mock import MockAdapter
+from app.db.session import SessionLocal
+from app.engine.runner import ContactRunner
+
+
 router = APIRouter(prefix="/tracking", tags=["tracking"])
+
+@asynccontextmanager
+async def session_scope():
+    async with SessionLocal() as db:
+        yield db
 
 
 @router.post("/{contact_id}/start")
@@ -19,8 +31,29 @@ async def start_tracking(
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
 
-    # For now: we can't start without an adapter instance; next we will provide a mock adapter
-    return {"ok": True, "note": "adapter not wired yet"}
+    # For now, only wire mock in a clean, deterministic way.
+    # Next we’ll add Signal + WhatsApp adapters and choose based on contact.platform.
+    platform = contact.platform
+
+    async def runner() -> None:
+        adapter = MockAdapter()
+        try:
+            cr = ContactRunner(
+                adapter=adapter,
+                correlator=engine_runtime.correlator,
+                points_repo=engine_runtime.points_repo,
+                db_factory=session_scope,
+                user_id=user.id,
+                contact_id=contact.id,
+                platform=platform,
+                timeout_ms=10_000,
+            )
+            await cr.run()
+        finally:
+            await adapter.close()
+
+    await engine_runtime.tracking.start(user.id, contact.id, runner)
+    return {"ok": True}
 
 
 @router.post("/{contact_id}/stop")

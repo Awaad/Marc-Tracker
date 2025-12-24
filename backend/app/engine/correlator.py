@@ -30,6 +30,11 @@ class Correlator:
         self._by_contact: dict[tuple[int, int], ContactMetrics] = {}
         self._probe_sent_at: dict[tuple[int, int, str], int] = {}  # (user,contact,probe_id)->sent_ms
 
+    
+    def is_probe_pending(self, user_id: int, contact_id: int, probe_id: str) -> bool:
+        return (user_id, contact_id, probe_id) in self._probe_sent_at
+
+
     def mark_probe_sent(self, user_id: int, contact_id: int, probe_id: str, sent_at_ms: int) -> None:
         self._probe_sent_at[(user_id, contact_id, probe_id)] = sent_at_ms
 
