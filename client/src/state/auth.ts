@@ -6,6 +6,7 @@ type AuthState = {
   setToken: (t: string | null) => void;
   login: (identifier: string, password: string) => Promise<void>;
   register: (email: string, user_name: string, password: string) => Promise<void>;
+  logout: () => void;
 };
 
 export const useAuth = create<AuthState>((set) => ({
@@ -13,6 +14,10 @@ export const useAuth = create<AuthState>((set) => ({
   setToken: (t) => {
     setToken(t);
     set({ token: t });
+  },
+  logout: () => {
+    setToken(null);
+    set({ token: null });
   },
   login: async (identifier, password) => {
     const r = await apiFetch<{ access_token: string }>("/auth/login", {

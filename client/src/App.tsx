@@ -1,7 +1,27 @@
+import { BrowserRouter, Link, Route, Routes } from "react-router-dom";
 import Login from "./app/Login";
+//import Register from "./app/Register";
 import { useAuth } from "./state/auth";
 
 export default function App() {
   const token = useAuth((s) => s.token);
-  return token ? <div style={{ padding: 24 }}>Logged in</div> : <Login />;
+
+  return (
+    <BrowserRouter>
+      {!token ? (
+        <>
+          <div className="p-4 flex gap-4">
+            <Link className="underline" to="/">Login</Link>
+            <Link className="underline" to="/register">Register</Link>
+          </div>
+          <Routes>
+            <Route path="/" element={<Login />} />
+            {/* <Route path="/register" element={<Register />} /> */}
+          </Routes>
+        </>
+      ) : (
+        <div className="p-6">Logged in </div>
+      )}
+    </BrowserRouter>
+  );
 }

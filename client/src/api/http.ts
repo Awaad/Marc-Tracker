@@ -25,3 +25,9 @@ export async function apiFetch<T>(
   }
   return (await res.json()) as T;
 }
+
+export function wsBaseUrl(): string {
+  // http://localhost:8000 -> ws://localhost:8000
+  // https://... -> wss://...
+  return API_BASE.replace(/^http/, "ws");
+}
