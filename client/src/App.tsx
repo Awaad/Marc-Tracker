@@ -2,6 +2,7 @@ import { BrowserRouter, Link, Route, Routes } from "react-router-dom";
 import Login from "./app/Login";
 //import Register from "./app/Register";
 import { useAuth } from "./state/auth";
+import Dashboard from "./app/Dashboard";
 
 export default function App() {
   const token = useAuth((s) => s.token);
@@ -20,7 +21,7 @@ export default function App() {
           </Routes>
         </>
       ) : (
-        <div className="p-6">Logged in </div>
+        <Dashboard />
       )}
     </BrowserRouter>
   );
