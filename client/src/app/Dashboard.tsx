@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../api/http";
 import { useAuth } from "../state/auth";
 import { useTracker } from "../state/tracker";
@@ -9,6 +9,9 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import TrackerChart from "../components/TrackerChart";
+
 
 export default function Dashboard() {
   const logout = useAuth((s) => s.logout);
@@ -16,6 +19,8 @@ export default function Dashboard() {
     useTracker();
   const snapshots = useTracker((s) => s.snapshots);
   const points = useTracker((s) => s.points);
+
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>("primary");
 
   useTrackerWs();
 
@@ -41,12 +46,21 @@ export default function Dashboard() {
     })().catch(console.error);
   }, [selectedContactId, seedHistory]);
 
+  useEffect(() => {
+    setSelectedDeviceId("primary");
+  }, [selectedContactId]);
+
   const selectedSnapshot = selectedContactId ? snapshots[selectedContactId] : undefined;
 
   const selectedPointsByDevice = selectedContactId ? points[selectedContactId] ?? {} : {};
   const deviceIds = Object.keys(selectedPointsByDevice);
-  const primaryDeviceId = deviceIds.sort()[0] ?? "primary";
-  const primaryPoints = selectedPointsByDevice[primaryDeviceId] ?? [];
+  // If selected device doesn’t exist yet, fall back deterministically
+  const effectiveDeviceId = deviceIds.includes(selectedDeviceId)
+    ? selectedDeviceId
+    : (deviceIds[0] ?? "primary");
+
+  const rb = selectedContactId ? selectedPointsByDevice[effectiveDeviceId] : undefined;
+  const primaryPoints = rb ? rb.toArray() : [];
 
   return (
     <div className="min-h-screen p-6">
@@ -161,22 +175,34 @@ export default function Dashboard() {
                   )}
                 </div>
 
-                <div>
-                  <div className="text-sm font-medium mb-2">Recent points (device: {primaryDeviceId})</div>
-                  <div className="text-xs text-muted-foreground mb-2">
-                    points: {primaryPoints.length} • median/threshold shown per point
-                  </div>
-                  <div className="max-h-64 overflow-auto border rounded-lg p-2">
-                    {primaryPoints.slice(-30).map((p) => (
-                      <div key={p.timestamp_ms} className="text-xs flex justify-between py-1">
-                        <span>{new Date(p.timestamp_ms).toLocaleTimeString()}</span>
-                        <span>{p.state}</span>
-                        <span>{Math.round(p.rtt_ms)} ms</span>
-                        <span>avg {Math.round(p.avg_ms)}</span>
-                      </div>
-                    ))}
+                                <div className="flex items-center justify-between">
+                  <div className="text-sm font-medium">Chart</div>
+                  <div className="w-56">
+                    <Select value={effectiveDeviceId} onValueChange={setSelectedDeviceId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Device" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {deviceIds.length === 0 ? (
+                          <SelectItem value="primary">primary</SelectItem>
+                        ) : (
+                          deviceIds.map((id) => (
+                            <SelectItem key={id} value={id}>
+                              {id}
+                            </SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
+
+                <TrackerChart points={primaryPoints} />
+
+                <div className="text-xs text-muted-foreground">
+                  device: {effectiveDeviceId} • points: {primaryPoints.length}
+                </div>
+
               </div>
             )}
           </CardContent>

@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import type { Contact, TrackerPoint, TrackerSnapshot, WsMessage } from "../types";
+import { RingBuffer } from "../lib/ring";
+
 
 type TrackerState = {
   contacts: Contact[];
@@ -8,7 +10,7 @@ type TrackerState = {
   runningContactIds: Set<string>;
 
   // bounded history per contact/device
-  points: Record<string, Record<string, TrackerPoint[]>>; // points[contactId][deviceId]=[]
+  points: Record<string, Record<string, RingBuffer<TrackerPoint>>>; // points[contactId][deviceId]=[]
   snapshots: Record<string, TrackerSnapshot | undefined>;
 
   setContacts: (c: Contact[]) => void;
@@ -34,9 +36,9 @@ export const useTracker = create<TrackerState>((set, get) => ({
   setRunning: (ids) => set({ runningContactIds: new Set(ids) }),
 
   seedHistory: (contactId, history) => {
-    const grouped: Record<string, TrackerPoint[]> = {};
+    const grouped: Record<string, RingBuffer<TrackerPoint>> = {};
     for (const p of history) {
-      grouped[p.device_id] ||= [];
+      grouped[p.device_id] ||= new RingBuffer<TrackerPoint>(MAX_POINTS);
       grouped[p.device_id].push(p);
     }
     set((s) => ({
@@ -55,10 +57,9 @@ export const useTracker = create<TrackerState>((set, get) => ({
       const p = msg.point;
       set((s) => {
         const byContact = s.points[cid] ? { ...s.points[cid] } : {};
-        const arr = byContact[p.device_id] ? [...byContact[p.device_id]] : [];
-        arr.push(p);
-        if (arr.length > MAX_POINTS) arr.splice(0, arr.length - MAX_POINTS);
-        byContact[p.device_id] = arr;
+        const rb = byContact[p.device_id] ?? new RingBuffer<TrackerPoint>(MAX_POINTS);
+        rb.push(p);
+        byContact[p.device_id] = rb;
         return { points: { ...s.points, [cid]: byContact } };
       });
       return;
