@@ -59,3 +59,4 @@ async def _startup() -> None:
 @app.on_event("shutdown")
 async def _shutdown() -> None:
     await engine_runtime.stop()
+    await adapter_hub.shutdown_all()

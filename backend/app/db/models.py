@@ -1,5 +1,6 @@
-from sqlalchemy import String, Integer, Float, ForeignKey, Text
+from sqlalchemy import String, Integer, Float, ForeignKey, Text, Index, BigInteger, JSON
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
 
 
 class Base(DeclarativeBase):
@@ -46,3 +47,27 @@ class TrackerPoint(Base):
     avg_ms: Mapped[float] = mapped_column(Float)
     median_ms: Mapped[float] = mapped_column(Float)
     threshold_ms: Mapped[float] = mapped_column(Float)
+
+
+class PlatformProbe(Base):
+    __tablename__ = "platform_probes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    contact_id: Mapped[int] = mapped_column(ForeignKey("contacts.id", ondelete="CASCADE"), index=True)
+
+    platform: Mapped[str] = mapped_column(String(32), index=True)
+    probe_id: Mapped[str] = mapped_column(String(64), index=True)
+
+    # For Signal, receipts include timestamps of the original sent message.
+    platform_message_ts: Mapped[int | None] = mapped_column(BigInteger, index=True)
+
+    sent_at_ms: Mapped[int] = mapped_column(BigInteger)
+    delivered_at_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    read_at_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    send_response: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    __table_args__ = (
+        Index("ix_platform_probe_unique", "platform", "probe_id", unique=True),
+    )
