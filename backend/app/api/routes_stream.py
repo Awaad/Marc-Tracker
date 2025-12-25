@@ -9,8 +9,10 @@ from app.db.models import Contact as ContactOrm, User
 from app.db.session import SessionLocal
 from app.realtime.manager import ws_manager
 from app.settings import settings
+import logging
 
 
+log = logging.getLogger("app.ws")
 router = APIRouter(tags=["stream"])
 
 
@@ -35,42 +37,61 @@ async def _auth_ws_and_load_user(ws: WebSocket) -> User:
             raise RuntimeError("No user")
         return user
     
+def coerce_platform(raw) -> Platform:
+    if isinstance(raw, Platform):
+        return raw
+    if isinstance(raw, str):
+        return Platform(raw)
+    # fallback: stringify
+    return Platform(str(raw))
+
 
 @router.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
-    await ws.accept()
-    await ws.send_text(json.dumps({"type": "ws:direct-test", "ok": True}))
     try:
         user = await _auth_ws_and_load_user(ws)
     except RuntimeError:
         return
-    ws.state.user = user
+    await ws.accept()
+    
 
     await ws_manager.connect(user.id, ws)
-    await ws_manager.broadcast_to_user(user.id, {"type": "ws:broadcast-test", "ok": True})
+
     try:
-        # Send initial contacts list
-        async with SessionLocal() as db:
-            rows = (await db.scalars(select(ContactOrm).where(ContactOrm.user_id == user.id))).all()
-            contacts = [
-                ContactOut(
-                    id=str(c.id),
-                    platform=Platform(c.platform),
-                    target=c.target,
-                    display_name=c.display_name or "",
-                    display_number=c.display_number or "",
-                    capabilities=capabilities_for(Platform(c.platform)),
-                ).model_dump()
-                for c in rows
-            ]
+            await ws.send_text(json.dumps({"type": "ws:direct-test", "ok": True}))
+            await ws_manager.broadcast_to_user(user.id, {"type": "ws:broadcast-test", "ok": True})
 
-        await ws.send_text(json.dumps({"type": "contacts:init", "contacts": contacts}))
+            async with SessionLocal() as db:
+                rows = (await db.scalars(select(ContactOrm).where(ContactOrm.user_id == user.id))).all()
 
-        while True:
-            
-            await ws.receive_text()
+            contacts = []
+            for c in rows:
+                p = coerce_platform(c.platform)
+                contacts.append(
+                    ContactOut(
+                        id=str(c.id),
+                        platform=p,
+                        target=c.target,
+                        display_name=c.display_name or "",
+                        display_number=c.display_number or "",
+                        capabilities=capabilities_for(p),
+                    ).model_dump()
+                )
+
+            await ws.send_text(json.dumps({"type": "contacts:init", "contacts": contacts}))
+
+            while True:
+                msg = await ws.receive()
+                if msg["type"] == "websocket.disconnect":
+                    break
 
     except WebSocketDisconnect:
         pass
+    except Exception:
+        log.exception("ws handler crashed", extra={"user_id": getattr(user, "id", None)})
+        try:
+            await ws.close(code=1011, reason="server error")
+        except Exception:
+            pass
     finally:
         await ws_manager.disconnect(user.id, ws)
