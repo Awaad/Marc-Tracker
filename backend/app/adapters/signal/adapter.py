@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+import uuid
+from typing import AsyncIterator
 
 from sqlalchemy import select
 
-from app.adapters.base import BaseAdapter
+from app.adapters.base import AdapterProbe, AdapterReceipt, BaseAdapter
 from app.adapters.signal.client import SignalRestClient
 from app.adapters.signal.service import SignalService, signal_service
 from app.db.models import Contact as ContactOrm
@@ -13,16 +14,12 @@ from app.db.session import SessionLocal
 from app.storage.probe_repo import ProbeRepo
 
 
-def _now_ms() -> int:
+def now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def _extract_message_ts(send_response: dict) -> int | None:
-    """
-    signal-cli-rest-api versions differ; try a few shapes.
-    We want the message timestamp that later appears in receiptMessage.timestamps[].
-    """
-    # common guesses (best-effort)
+def extract_message_ts(send_response: dict) -> int | None:
+    # best-effort: shape depends on signal-cli-rest-api version
     for key in ("timestamp", "messageTimestamp", "sentTimestamp"):
         v = send_response.get(key)
         if isinstance(v, (int, float)):
@@ -47,24 +44,35 @@ class SignalAdapter(BaseAdapter):
         self._service = service
         self._client = SignalRestClient()
         self._repo = ProbeRepo()
-        self._probe_to_ts: dict[str, int] = {}
+        self._queue = None
+        self._closed = False
 
     async def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         await self._client.close()
+        await self._service.unsubscribe(self.user_id, self.contact_id)
 
-    async def send_probe(self, probe_id: str) -> dict[str, Any]:
-        # Load recipient (contact.target) lazily
+    async def send_probe(self, *, user_id: int, contact_id: int) -> AdapterProbe:
+        # guard (engine passes same ids)
+        if user_id != self.user_id or contact_id != self.contact_id:
+            raise RuntimeError("SignalAdapter bound to different user/contact")
+
         async with SessionLocal() as db:
-            c = await db.scalar(select(ContactOrm).where(ContactOrm.id == self.contact_id, ContactOrm.user_id == self.user_id))
+            c = await db.scalar(
+                select(ContactOrm).where(ContactOrm.id == self.contact_id, ContactOrm.user_id == self.user_id)
+            )
             if not c:
                 raise RuntimeError("Contact not found for SignalAdapter")
             recipient = c.target
 
-        message = f"[probe:{probe_id}] ping"
-        resp = await self._client.send_text(recipient=recipient, message=message)
-        ts = _extract_message_ts(resp)
+        probe_id = uuid.uuid4().hex
+        sent_at = now_ms()
 
-        sent_ms = _now_ms()
+        resp = await self._client.send_text(recipient=recipient, message=f"[probe:{probe_id}] ping")
+        msg_ts = extract_message_ts(resp)
+
         async with SessionLocal() as db:
             await self._repo.insert_probe(
                 db,
@@ -72,27 +80,31 @@ class SignalAdapter(BaseAdapter):
                 contact_id=self.contact_id,
                 platform="signal",
                 probe_id=probe_id,
-                sent_at_ms=sent_ms,
-                platform_message_ts=ts,
+                sent_at_ms=sent_at,
+                platform_message_ts=msg_ts,
                 send_response=resp,
             )
 
-        if ts is not None:
-            self._probe_to_ts[probe_id] = ts
+        return AdapterProbe(probe_id=probe_id, sent_at_ms=sent_at, platform_message_id=str(msg_ts) if msg_ts else None)
 
-        return {"platform_message_ts": ts, "send_response": resp}
+    async def receipts(self, *, user_id: int, contact_id: int) -> AsyncIterator[AdapterReceipt]:
+        if user_id != self.user_id or contact_id != self.contact_id:
+            raise RuntimeError("SignalAdapter bound to different user/contact")
 
-    async def wait_delivery(self, probe_id: str, timeout_ms: int) -> dict[str, Any] | None:
-        ts = self._probe_to_ts.get(probe_id)
-        if ts is None:
-            # Can't wait if send didn't yield a timestamp
-            return None
+        if self._queue is None:
+            self._queue = await self._service.subscribe(self.user_id, self.contact_id)
 
-        ev = await self._service.wait_receipt(ts, timeout_ms=timeout_ms)
-        if not ev:
-            return None
-        if ev.kind != "delivery":
-            # for now we treat only delivery as ACK (read/view can be later)
-            return None
+        while not self._closed:
+            ev = await self._queue.get()
 
-        return {"delivered_at_ms": ev.when_ms, "platform_message_ts": ev.message_ts}
+            # IMPORTANT: to keep RTT semantics consistent, yield only "delivery" as ACK.
+            if ev.kind != "delivery":
+                continue
+
+            yield AdapterReceipt(
+                probe_id=ev.probe_id,
+                device_id="primary",  # Signal multi-device support can be enhanced later
+                received_at_ms=ev.when_ms,
+                status="delivered",
+                platform_message_id=str(ev.message_ts),
+            )

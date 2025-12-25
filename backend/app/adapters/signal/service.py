@@ -4,20 +4,24 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
+from sqlalchemy import select
 
 import websockets
 from websockets.exceptions import ConnectionClosed
 
 from app.db.session import SessionLocal
 from app.settings import settings
-from app.storage.probe_repo import ProbeRepo
+from app.db.models import PlatformProbe
 
 log = logging.getLogger("app.signal")
 
 
-@dataclass
-class ReceiptEvent:
-    kind: str  # "delivery" | "read"
+@dataclass(frozen=True)
+class ResolvedReceipt:
+    user_id: int
+    contact_id: int
+    probe_id: str
+    kind: str        # "delivery" | "read"
     when_ms: int
     message_ts: int
 
@@ -26,9 +30,9 @@ class SignalService:
     def __init__(self) -> None:
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
-        self._waiters: dict[int, asyncio.Future[ReceiptEvent]] = {}  # message_ts -> future
+        
         self._lock = asyncio.Lock()
-        self._repo = ProbeRepo()
+        self._queues: dict[tuple[int, int], asyncio.Queue[ResolvedReceipt]] = {}
 
     async def start_all(self) -> None:
         if not settings.signal_enabled:
@@ -36,6 +40,9 @@ class SignalService:
             return
         if not settings.signal_account:
             log.warning("signal enabled but SIGNAL_ACCOUNT missing")
+            return
+        
+        if self._task and not self._task.done():
             return
 
         self._stop.clear()
@@ -51,25 +58,35 @@ class SignalService:
                 pass
             self._task = None
 
-    async def wait_receipt(self, message_ts: int, timeout_ms: int) -> ReceiptEvent | None:
-        fut = asyncio.get_running_loop().create_future()
-
         async with self._lock:
-            self._waiters[message_ts] = fut
+            self._queues.clear()
 
+    
+    async def subscribe(self, user_id: int, contact_id: int) -> asyncio.Queue[ResolvedReceipt]:
+        async with self._lock:
+            key = (user_id, contact_id)
+            q = self._queues.get(key)
+            if not q:
+                q = asyncio.Queue(maxsize=10_000)
+                self._queues[key] = q
+            return q
+        
+
+    async def unsubscribe(self, user_id: int, contact_id: int) -> None:
+        async with self._lock:
+            self._queues.pop((user_id, contact_id), None)
+
+
+    async def _publish(self, ev: ResolvedReceipt) -> None:
+        async with self._lock:
+            q = self._queues.get((ev.user_id, ev.contact_id))
+        if not q:
+            return
         try:
-            return await asyncio.wait_for(fut, timeout=timeout_ms / 1000)
-        except asyncio.TimeoutError:
-            return None
-        finally:
-            async with self._lock:
-                self._waiters.pop(message_ts, None)
+            q.put_nowait(ev)
+        except asyncio.QueueFull:
+            log.warning("signal queue full, dropping receipt", extra={"user_id": ev.user_id, "contact_id": ev.contact_id})
 
-    async def _notify(self, ev: ReceiptEvent) -> None:
-        async with self._lock:
-            fut = self._waiters.get(ev.message_ts)
-            if fut and not fut.done():
-                fut.set_result(ev)
 
     async def _run_loop(self) -> None:
         ws_url = settings.signal_ws_url()
@@ -118,16 +135,36 @@ class SignalService:
         for ts in timestamps:
             message_ts = int(ts)
 
-            # Persist: map receipt -> probe row (if we have it)
+            # Resolve message_ts -> platform_probes row -> probe_id/user/contact
             async with SessionLocal() as db:
-                row = await self._repo.find_by_platform_ts(db, platform="signal", platform_message_ts=message_ts)
-                if row:
-                    if kind == "delivery":
-                        await self._repo.mark_delivered(db, probe_id=row.probe_id, delivered_at_ms=when_ms)
-                    elif kind == "read":
-                        await self._repo.mark_read(db, probe_id=row.probe_id, read_at_ms=when_ms)
+                row = await db.scalar(
+                    select(PlatformProbe).where(
+                        PlatformProbe.platform == "signal",
+                        PlatformProbe.platform_message_ts == message_ts,
+                    )
+                )
+                if not row:
+                    continue
 
-            await self._notify(ReceiptEvent(kind=kind, when_ms=when_ms, message_ts=message_ts))
+                # Persist delivered/read time into DB
+                if kind == "delivery" and row.delivered_at_ms is None:
+                    row.delivered_at_ms = when_ms
+                    await db.commit()
+                elif kind == "read" and row.read_at_ms is None:
+                    row.read_at_ms = when_ms
+                    await db.commit()
+
+                await self._publish(
+                    ResolvedReceipt(
+                        user_id=row.user_id,
+                        contact_id=row.contact_id,
+                        probe_id=row.probe_id,
+                        kind=kind,
+                        when_ms=when_ms,
+                        message_ts=message_ts,
+                    )
+                )
+
 
 
 signal_service = SignalService()
