@@ -1,6 +1,9 @@
 import express from "express";
 import { WebSocketServer } from "ws";
-import makeWASocket, { useMultiFileAuthState } from "@whiskeysockets/baileys";
+import makeWASocket, { useMultiFileAuthState,  DisconnectReason,
+  fetchLatestBaileysVersion } from "@whiskeysockets/baileys";
+import QRCode from "qrcode";
+
 
 const app = express();
 app.use(express.json());
@@ -20,6 +23,13 @@ function broadcast(obj: any) {
   }
 }
 
+
+app.get("/", (_req, res) => {
+  res.type("text/plain").send("OK. Use GET /qr, POST /send, WS /events");
+});
+
+
+
 const server = app.listen(8099, () => console.log("wa-bridge listening on :8099"));
 
 server.on("upgrade", (req, socket, head) => {
@@ -30,31 +40,78 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
-(async () => {
-  // Persist auth state on disk
+let sock: ReturnType<typeof makeWASocket> | null = null;
+let isOpen = false;
+let lastQr: string | null = null;
+
+async function startSock() {
   const { state, saveCreds } = await useMultiFileAuthState("./auth");
-  const sock = makeWASocket({ auth: state, printQRInTerminal: true });
+  const { version } = await fetchLatestBaileysVersion();
+
+  // assign to global (no shadowing)
+  sock = makeWASocket({ auth: state, version });
 
   sock.ev.on("creds.update", saveCreds);
 
-  // For outgoing message delivery/read-ish signals, Baileys surfaces updates here (best-effort).
+  sock.ev.on("connection.update", (u: any) => {
+    if (u.qr) {
+      lastQr = u.qr;
+      console.log("QR updated. Open http://localhost:8099/qr.png");
+    }
+
+    if (u.connection === "open") {
+      isOpen = true;
+      console.log("connection open");
+    }
+
+    if (u.connection === "close") {
+      isOpen = false;
+      const statusCode = (u.lastDisconnect?.error as any)?.output?.statusCode;
+      console.log("connection closed:", statusCode);
+
+      if (statusCode === DisconnectReason.loggedOut) {
+        console.log("Logged out. Delete ./auth and relink.");
+        return;
+      }
+
+      setTimeout(() => startSock().catch(console.error), 1500);
+    }
+  });
+
   sock.ev.on("messages.update", (updates: any[]) => {
     for (const u of updates) {
       const messageId = u?.key?.id;
-      const status = u?.update?.status ?? u?.update?.ack; // varies by version
+      const status = u?.update?.status ?? u?.update?.ack;
       if (typeof messageId === "string" && status !== undefined) {
         broadcast({ type: "wa:update", message_id: messageId, status, ts: Date.now() });
       }
     }
   });
+}
 
-  app.post("/send", async (req, res) => {
-    const { to, text } = req.body ?? {};
-    if (!to || !text) return res.status(400).json({ error: "to,text required" });
+// Register routes ONCE (outside startSock)
+app.post("/send", async (req, res) => {
+  const { to, text } = req.body ?? {};
+  if (!to || !text) return res.status(400).json({ error: "to,text required" });
 
-    const jid = String(to).replace("+", "") + "@s.whatsapp.net";
-    const r = await sock.sendMessage(jid, { text: String(text) });
+  if (!sock || !isOpen) return res.status(503).json({ error: "wa socket not connected" });
 
-    res.json({ message_id: r?.key?.id ?? null, raw: r });
-  });
-})();
+  const jid = String(to).replace("+", "") + "@s.whatsapp.net";
+  const r = await sock.sendMessage(jid, { text: String(text) });
+
+  res.json({ message_id: r?.key?.id ?? null, raw: r });
+});
+
+
+
+app.get("/qr", (_req, res) => {
+  res.json({ qr: lastQr });
+});
+
+app.get("/qr.png", async (_req, res) => {
+  if (!lastQr) return res.status(404).send("No QR yet");
+  const png = await QRCode.toBuffer(lastQr);
+  res.type("image/png").send(png);
+});
+
+startSock().catch(console.error);
