@@ -78,6 +78,7 @@ class ContactRunner:
             avg_ms=result["avg_ms"],
             median_ms=med,
             threshold_ms=thr,
+            probe_id=probe_id,
         )
 
         await self._broadcast_snapshot(devices, med, thr)
@@ -100,6 +101,7 @@ class ContactRunner:
                 avg_ms=update["avg_ms"],
                 median_ms=update["median_ms"],
                 threshold_ms=update["threshold_ms"],
+                probe_id=r.probe_id,
             )
             await self._broadcast_snapshot(devices, med, thr)
 
@@ -112,6 +114,7 @@ class ContactRunner:
         avg_ms: float,
         median_ms: float,
         threshold_ms: float,
+        probe_id: str | None = None,
     ) -> None:
         ts = now_ms()
         async with self.db_factory() as db:  # type: ignore
@@ -126,6 +129,7 @@ class ContactRunner:
                 avg_ms=avg_ms,
                 median_ms=median_ms,
                 threshold_ms=threshold_ms,
+                probe_id=probe_id,
             )
 
         await ws_manager.broadcast_to_user(
@@ -142,6 +146,7 @@ class ContactRunner:
                     "avg_ms": avg_ms,
                     "median_ms": median_ms,
                     "threshold_ms": threshold_ms,
+                    "probe_id": probe_id,
                 },
             },
         )

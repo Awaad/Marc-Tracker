@@ -47,6 +47,7 @@ class TrackerPoint(BaseModel):
     avg_ms: float
     median_ms: float
     threshold_ms: float
+    probe_id: str | None = None
 
 
 class ContactCreate(BaseModel):
@@ -78,6 +79,19 @@ class ContactSnapshot(BaseModel):
     median_ms: float = 0.0
     threshold_ms: float = 0.0
     capabilities: Capabilities
+
+
+class PlatformProbeOut(BaseModel):
+    platform: str
+    probe_id: str
+    sent_at_ms: int
+    platform_message_ts: int | None = None
+    delivered_at_ms: int | None = None
+    read_at_ms: int | None = None
+
+    delivery_lag_ms: int | None = None
+    read_lag_ms: int | None = None
+
 
 
 # ---- engine-internal events (dataclasses, not API) ----

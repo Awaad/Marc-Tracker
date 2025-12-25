@@ -19,6 +19,7 @@ class TrackerPointsRepo:
         avg_ms: float,
         median_ms: float,
         threshold_ms: float,
+        probe_id: str | None = None,
     ) -> None:
         db.add(
             TrackerPointOrm(
@@ -31,6 +32,7 @@ class TrackerPointsRepo:
                 avg_ms=avg_ms,
                 median_ms=median_ms,
                 threshold_ms=threshold_ms,
+                probe_id=probe_id,
             )
         )
         await db.commit()

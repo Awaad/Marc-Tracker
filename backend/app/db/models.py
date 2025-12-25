@@ -48,6 +48,8 @@ class TrackerPoint(Base):
     median_ms: Mapped[float] = mapped_column(Float)
     threshold_ms: Mapped[float] = mapped_column(Float)
 
+    probe_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+
 
 class PlatformProbe(Base):
     __tablename__ = "platform_probes"

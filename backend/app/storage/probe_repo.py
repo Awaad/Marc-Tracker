@@ -74,3 +74,5 @@ class ProbeRepo:
         )
         await db.execute(stmt)
         await db.commit()
+
+    
