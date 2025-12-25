@@ -41,6 +41,4 @@ def register_adapters() -> None:
         )
     )
 
-    # Placeholders 
-    # adapter_hub.register(AdapterEntry(platform=Platform.signal, factory=..., start_all=..., stop_all=...))
-    # adapter_hub.register(AdapterEntry(platform=Platform.whatsapp, factory=..., start_all=..., stop_all=...))
+   
