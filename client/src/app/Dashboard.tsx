@@ -10,8 +10,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Badge } from "../components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Input } from "../components/ui/input"; 
 import TrackerChart from "../components/TrackerChart";
 
+type ContactCreatePayload = {
+  platform: "mock" | "signal" | "whatsapp_web"; 
+  target: string;
+  display_name: string;
+  display_number: string;
+  avatar_url: string | null;
+  platform_meta: Record<string, unknown>;
+};
 
 export default function Dashboard() {
   const logout = useAuth((s) => s.logout);
@@ -22,15 +31,24 @@ export default function Dashboard() {
 
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>("primary");
 
+  // contact form state
+  const [newPlatform, setNewPlatform] = useState<ContactCreatePayload["platform"]>("whatsapp_web");
+  const [newTarget, setNewTarget] = useState<string>("");
+  const [newDisplayName, setNewDisplayName] = useState<string>("");
+  const [newDisplayNumber, setNewDisplayNumber] = useState<string>("");
+
   useTrackerWs();
 
+  async function refreshContactsAndRunning() {
+    const c = await apiFetch<Contact[]>("/contacts");
+    setContacts(c);
+    const r = await apiFetch<{ contact_ids: number[] }>("/tracking/running");
+    setRunning(r.contact_ids.map(String));
+  }
+
   useEffect(() => {
-    (async () => {
-      const c = await apiFetch<Contact[]>("/contacts");
-      setContacts(c);
-      const r = await apiFetch<{ contact_ids: number[] }>("/tracking/running");
-      setRunning(r.contact_ids.map(String));
-    })().catch(console.error);
+    refreshContactsAndRunning().catch(console.error);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setContacts, setRunning]);
 
   const selected = useMemo(
@@ -54,13 +72,40 @@ export default function Dashboard() {
 
   const selectedPointsByDevice = selectedContactId ? points[selectedContactId] ?? {} : {};
   const deviceIds = Object.keys(selectedPointsByDevice);
-  // If selected device doesn’t exist yet, fall back deterministically
   const effectiveDeviceId = deviceIds.includes(selectedDeviceId)
     ? selectedDeviceId
     : (deviceIds[0] ?? "primary");
 
   const rb = selectedContactId ? selectedPointsByDevice[effectiveDeviceId] : undefined;
   const primaryPoints = rb ? rb.toArray() : [];
+
+  async function createContact() {
+    const target = newTarget.trim();
+    if (!target) return;
+
+    const payload: ContactCreatePayload = {
+      platform: newPlatform,
+      target,
+      display_name: newDisplayName.trim(),
+      display_number: (newDisplayNumber.trim() || target),
+      avatar_url: null,
+      platform_meta: {},
+    };
+
+    const created = await apiFetch<Contact>("/contacts", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+
+    // clear form
+    setNewTarget("");
+    setNewDisplayName("");
+    setNewDisplayNumber("");
+
+    // refresh list + running; also select created
+    await refreshContactsAndRunning();
+    setSelected(created.id);
+  }
 
   return (
     <div className="min-h-screen p-6">
@@ -77,9 +122,69 @@ export default function Dashboard() {
           <CardHeader>
             <CardTitle>Contacts</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2">
+
+          <CardContent className="space-y-3">
+            {/* contact form */}
+            <div className="p-3 rounded-lg border space-y-2">
+              <div className="text-sm font-medium">Add contact</div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <Select value={newPlatform} onValueChange={(v) => setNewPlatform(v as ContactCreatePayload["platform"])}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Platform" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="signal">signal</SelectItem>
+                    <SelectItem value="whatsapp_web">whatsapp_web</SelectItem>
+                    <SelectItem value="mock">mock</SelectItem>
+                    {/* WhatsApp Cloud intentionally not shown */}
+                  </SelectContent>
+                </Select>
+
+                <Input
+                  placeholder="Target (e.g. +905...)"
+                  value={newTarget}
+                  onChange={(e) => setNewTarget(e.target.value)}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <Input
+                  placeholder="Display name"
+                  value={newDisplayName}
+                  onChange={(e) => setNewDisplayName(e.target.value)}
+                />
+                <Input
+                  placeholder="Display number"
+                  value={newDisplayNumber}
+                  onChange={(e) => setNewDisplayNumber(e.target.value)}
+                />
+              </div>
+
+              <div className="flex gap-2">
+                <Button size="sm" onClick={() => createContact().catch(console.error)} disabled={!newTarget.trim()}>
+                  Create
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => refreshContactsAndRunning().catch(console.error)}
+                >
+                  Refresh
+                </Button>
+              </div>
+
+              <div className="text-xs text-muted-foreground">
+                WhatsApp Cloud is disabled for now; use whatsapp_web bridge or signal.
+              </div>
+            </div>
+
             {contacts.map((c) => {
               const running = runningContactIds.has(c.id);
+
+              // Safety: keep WABA off + respect capabilities
+              const startDisabled = (c.platform === "whatsapp") || !c.capabilities.delivery_receipts;
+
               return (
                 <div
                   key={c.id}
@@ -97,12 +202,13 @@ export default function Dashboard() {
                   <div className="mt-2 flex gap-2">
                     <Button
                       size="sm"
+                      disabled={startDisabled}
                       onClick={async (e) => {
                         e.stopPropagation();
                         await apiFetch(`/tracking/${c.id}/start`, { method: "POST" });
-                        const r = await apiFetch<{ contact_ids: number[] }>("/tracking/running");
-                        setRunning(r.contact_ids.map(String));
+                        await refreshContactsAndRunning();
                       }}
+                      title={startDisabled ? "Platform not enabled / no delivery receipts" : undefined}
                     >
                       Start
                     </Button>
@@ -112,8 +218,7 @@ export default function Dashboard() {
                       onClick={async (e) => {
                         e.stopPropagation();
                         await apiFetch(`/tracking/${c.id}/stop`, { method: "POST" });
-                        const r = await apiFetch<{ contact_ids: number[] }>("/tracking/running");
-                        setRunning(r.contact_ids.map(String));
+                        await refreshContactsAndRunning();
                       }}
                     >
                       Stop
@@ -175,7 +280,7 @@ export default function Dashboard() {
                   )}
                 </div>
 
-                                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between">
                   <div className="text-sm font-medium">Chart</div>
                   <div className="w-56">
                     <Select value={effectiveDeviceId} onValueChange={setSelectedDeviceId}>
@@ -202,7 +307,6 @@ export default function Dashboard() {
                 <div className="text-xs text-muted-foreground">
                   device: {effectiveDeviceId} • points: {primaryPoints.length}
                 </div>
-
               </div>
             )}
           </CardContent>

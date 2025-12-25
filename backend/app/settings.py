@@ -8,7 +8,10 @@ class Settings(BaseSettings):
     app_name: str = "Marc-Tracker"
     app_version: str = "0.1.0"
     env: str = "dev"
-    cors_allow_origins: str = "*"  
+    cors_allow_origins: str = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
 
     database_url: str = "sqlite+aiosqlite:///./activity_tracker.db"
 

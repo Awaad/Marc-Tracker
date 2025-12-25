@@ -49,3 +49,26 @@ export type WsMessage =
   | { type: "tracker:point"; contact_id: number; platform: Platform; point: TrackerPoint }
   | { type: "tracker:snapshot"; contact_id: number; platform: Platform; snapshot: TrackerSnapshot }
   | { type: string; [k: string]: any };
+
+
+export type PlatformProbeOut = {
+  platform: string;
+  probe_id: string;
+  sent_at_ms: number;
+  platform_message_ts?: number | null;
+  platform_message_id?: string | null;
+  delivered_at_ms?: number | null;
+  read_at_ms?: number | null;
+  delivery_lag_ms?: number | null;
+  read_lag_ms?: number | null;
+};
+
+
+export type ContactCreate = {
+  platform: "mock" | "signal" | "whatsapp_web"; // keep cloud off for now
+  target: string;
+  display_name?: string;
+  display_number?: string;
+  avatar_url?: string | null;
+  platform_meta?: Record<string, any>;
+};
