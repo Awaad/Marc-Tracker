@@ -4,8 +4,7 @@ import asyncio
 import logging
 import random
 import time
-
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Dict
 
 from app.adapters.base import BaseAdapter
 from app.engine.correlator import Correlator
@@ -31,60 +30,101 @@ class ContactRunner:
         contact_id: int,
         platform: str,
         timeout_ms: int = 10_000,
+        interval_s: float = 2.0,
     ) -> None:
         self.adapter = adapter
         self.correlator = correlator
         self.points_repo = points_repo
-        self.db_factory = db_factory  # callable AsyncSession context
+        self.db_factory = db_factory
         self.user_id = user_id
         self.contact_id = contact_id
         self.platform = platform
         self.timeout_ms = timeout_ms
+        self.interval_s = interval_s
+
+        self._stop = asyncio.Event()
+        self._timeout_tasks: Dict[str, asyncio.Task] = {}
+
+    def stop(self) -> None:
+        self._stop.set()
 
     async def run(self) -> None:
-        receipts_task = asyncio.create_task(self._receipt_loop())
+        receipts_task = asyncio.create_task(self._receipt_loop(), name=f"receipts:{self.contact_id}")
         try:
-            while True:
+            while not self._stop.is_set():
                 probe = await self.adapter.send_probe(user_id=self.user_id, contact_id=self.contact_id)
                 self.correlator.mark_probe_sent(self.user_id, self.contact_id, probe.probe_id, probe.sent_at_ms)
 
-                # schedule timeout
-                asyncio.create_task(self._timeout_check(probe.probe_id, probe.sent_at_ms))
+                # schedule timeout and keep a handle so we can cancel on receipt
+                t = asyncio.create_task(
+                    self._timeout_check(probe.probe_id, probe.sent_at_ms),
+                    name=f"timeout:{self.contact_id}:{probe.probe_id}",
+                )
+                self._timeout_tasks[probe.probe_id] = t
 
-                await asyncio.sleep(2.0 + random.random() * 0.1)
+                # small jitter to avoid periodic aliasing
+                await asyncio.sleep(self.interval_s + random.random() * 0.1)
         finally:
+            # stop receipt loop
             receipts_task.cancel()
             try:
                 await receipts_task
             except asyncio.CancelledError:
                 pass
 
+            # cancel any pending timeout tasks
+            for task in list(self._timeout_tasks.values()):
+                task.cancel()
+            for task in list(self._timeout_tasks.values()):
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    log.exception("timeout task crashed", extra={"user_id": self.user_id, "contact_id": self.contact_id})
+            self._timeout_tasks.clear()
+
     async def _timeout_check(self, probe_id: str, sent_at_ms: int) -> None:
-        await asyncio.sleep(self.timeout_ms / 1000)
+        try:
+            await asyncio.sleep(self.timeout_ms / 1000)
 
-        # only mark offline if probe is still pending
-        if not self.correlator.is_probe_pending(self.user_id, self.contact_id, probe_id):
-            return
-        
-        result = self.correlator.mark_offline(self.user_id, self.contact_id, device_id="primary", timeout_ms=self.timeout_ms)
+            # only mark offline/timeout if probe is still pending
+            if not self.correlator.is_probe_pending(self.user_id, self.contact_id, probe_id):
+                return
 
-        med, thr = self.correlator.global_stats(self.user_id, self.contact_id)
-        devices = self.correlator.snapshot_devices(self.user_id, self.contact_id)
+            # mark_timeout should both set state AND clear pending for probe_id
+            result = self.correlator.mark_timeout(
+                self.user_id,
+                self.contact_id,
+                probe_id=probe_id,
+                device_id="primary",
+                timeout_ms=self.timeout_ms,
+            )
 
-        await self._persist_and_broadcast(
-            device_id="primary",
-            state=result["state"],
-            rtt_ms=float(self.timeout_ms),
-            avg_ms=result["avg_ms"],
-            median_ms=med,
-            threshold_ms=thr,
-            probe_id=probe_id,
-        )
+            med, thr = self.correlator.global_stats(self.user_id, self.contact_id)
+            devices = self.correlator.snapshot_devices(self.user_id, self.contact_id)
 
-        await self._broadcast_snapshot(devices, med, thr)
+            await self._persist_and_broadcast(
+                device_id="primary",
+                state=result["state"],
+                rtt_ms=float(self.timeout_ms),
+                avg_ms=result["avg_ms"],
+                median_ms=med,
+                threshold_ms=thr,
+                probe_id=probe_id,
+            )
+            await self._broadcast_snapshot(devices, med, thr)
+        finally:
+            # cleanup
+            self._timeout_tasks.pop(probe_id, None)
 
     async def _receipt_loop(self) -> None:
         async for r in self.adapter.receipts(user_id=self.user_id, contact_id=self.contact_id):
+            # cancel timeout if still scheduled
+            t = self._timeout_tasks.pop(r.probe_id, None)
+            if t is not None:
+                t.cancel()
+
             update = self.correlator.apply_receipt(
                 self.user_id, self.contact_id, r.probe_id, r.device_id, r.received_at_ms
             )

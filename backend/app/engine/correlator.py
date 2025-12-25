@@ -15,6 +15,9 @@ class DeviceMetrics:
     last_rtt: float = 0.0
     recent: list[float] = field(default_factory=list)
     updated_at_ms: int = 0
+
+    # reliability
+    timeout_streak: int = 0
     offline: bool = False
 
 
@@ -25,34 +28,84 @@ class ContactMetrics:
 
 
 class Correlator:
+    """
+    Correlates sent probes with receipts and produces per-device and per-contact stats.
+
+    Reliability rules (v1):
+    - Receipt resets timeout_streak and sets offline=False
+    - Timeout increments timeout_streak
+      - streak == 1 => state "TIMEOUT" (not yet OFFLINE)
+      - streak >= 2 => offline=True and classifier sees is_offline=True
+    """
+
     def __init__(self, classifier: ClassifierV1) -> None:
         self.classifier = classifier
         self._by_contact: dict[tuple[int, int], ContactMetrics] = {}
         self._probe_sent_at: dict[tuple[int, int, str], int] = {}  # (user,contact,probe_id)->sent_ms
 
-    
     def is_probe_pending(self, user_id: int, contact_id: int, probe_id: str) -> bool:
         return (user_id, contact_id, probe_id) in self._probe_sent_at
-
 
     def mark_probe_sent(self, user_id: int, contact_id: int, probe_id: str, sent_at_ms: int) -> None:
         self._probe_sent_at[(user_id, contact_id, probe_id)] = sent_at_ms
 
-    def mark_offline(self, user_id: int, contact_id: int, device_id: str, timeout_ms: int) -> dict:
+    def mark_timeout(
+        self,
+        user_id: int,
+        contact_id: int,
+        *,
+        probe_id: str,
+        device_id: str,
+        timeout_ms: int,
+    ) -> dict:
+        """
+        Mark a specific probe as timed out:
+        - removes it from pending (prevents repeated timeouts on the same probe)
+        - increments timeout streak
+        - escalates to offline if streak >= 2
+        """
+        key = (user_id, contact_id, probe_id)
+        # ensure we don't time out the same probe twice
+        self._probe_sent_at.pop(key, None)
+
         cm = self._by_contact.setdefault((user_id, contact_id), ContactMetrics())
         dm = cm.devices.setdefault(device_id, DeviceMetrics())
-        dm.offline = True
+
+        dm.timeout_streak += 1
         dm.last_rtt = float(timeout_ms)
         dm.updated_at_ms = now_ms()
 
+        # escalate to OFFLINE after consecutive timeouts
+        dm.offline = dm.timeout_streak >= 2
+
+        # classifier only understands offline boolean; we map first-timeout ourselves
         state, med, thr = self.classifier.classify(
             global_history=cm.global_history,
             recent=dm.recent,
-            is_offline=True,
+            is_offline=dm.offline,
         )
-        return {"state": state, "median_ms": med, "threshold_ms": thr, "avg_ms": moving_avg(dm.recent)}
 
-    def apply_receipt(self, user_id: int, contact_id: int, probe_id: str, device_id: str, received_at_ms: int) -> dict | None:
+        if not dm.offline:
+            # First timeout: represent as TIMEOUT (useful for UI + analysis)
+            state = "TIMEOUT"
+
+        return {
+            "state": state,
+            "median_ms": med,
+            "threshold_ms": thr,
+            "avg_ms": moving_avg(dm.recent),
+            "timeout_streak": dm.timeout_streak,
+            "updated_at_ms": dm.updated_at_ms,
+        }
+
+    def apply_receipt(
+        self,
+        user_id: int,
+        contact_id: int,
+        probe_id: str,
+        device_id: str,
+        received_at_ms: int,
+    ) -> dict | None:
         key = (user_id, contact_id, probe_id)
         sent_at = self._probe_sent_at.pop(key, None)
         if sent_at is None:
@@ -63,6 +116,7 @@ class Correlator:
         dm = cm.devices.setdefault(device_id, DeviceMetrics())
 
         dm.offline = False
+        dm.timeout_streak = 0
         dm.last_rtt = rtt
         dm.updated_at_ms = received_at_ms
 
@@ -87,12 +141,14 @@ class Correlator:
             "median_ms": med,
             "threshold_ms": thr,
             "updated_at_ms": received_at_ms,
+            "timeout_streak": dm.timeout_streak,
         }
 
     def snapshot_devices(self, user_id: int, contact_id: int) -> list[dict]:
         cm = self._by_contact.get((user_id, contact_id))
         if not cm:
             return []
+
         out: list[dict] = []
         for device_id, dm in cm.devices.items():
             state, _, _ = self.classifier.classify(
@@ -100,6 +156,9 @@ class Correlator:
                 recent=dm.recent,
                 is_offline=dm.offline,
             )
+            if not dm.offline and dm.timeout_streak > 0:
+                state = "TIMEOUT"
+
             out.append(
                 {
                     "device_id": device_id,
@@ -107,6 +166,7 @@ class Correlator:
                     "rtt_ms": dm.last_rtt,
                     "avg_ms": moving_avg(dm.recent),
                     "updated_at_ms": dm.updated_at_ms,
+                    "timeout_streak": dm.timeout_streak,
                 }
             )
         return out
