@@ -3,7 +3,7 @@ import { apiFetch } from "../api/http";
 import { useAuth } from "../state/auth";
 import { useTracker } from "../state/tracker";
 import { useTrackerWs } from "../ws/useTrackerWs";
-import type { Contact, TrackerPoint } from "../types";
+import type { Contact, ContactCreatePayload, TrackerPoint } from "../types";
 
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -13,14 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Input } from "../components/ui/input"; 
 import TrackerChart from "../components/TrackerChart";
 
-type ContactCreatePayload = {
-  platform: "mock" | "signal" | "whatsapp_web"; 
-  target: string;
-  display_name: string;
-  display_number: string;
-  avatar_url: string | null;
-  platform_meta: Record<string, unknown>;
-};
+
 
 export default function Dashboard() {
   const logout = useAuth((s) => s.logout);
@@ -106,6 +99,16 @@ export default function Dashboard() {
     await refreshContactsAndRunning();
     setSelected(created.id);
   }
+
+  function ageText(ms: number | undefined) {
+  if (!ms) return "-";
+  const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  return `${h}h`;
+}
 
   return (
     <div className="min-h-screen p-6">
@@ -262,15 +265,31 @@ export default function Dashboard() {
                           <TableHead>State</TableHead>
                           <TableHead>RTT</TableHead>
                           <TableHead>Avg</TableHead>
+                          <TableHead>Streak</TableHead>
+                          <TableHead>Last</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {selectedSnapshot.devices.map((d) => (
                           <TableRow key={d.device_id}>
                             <TableCell>{d.device_id}</TableCell>
-                            <TableCell>{d.state}</TableCell>
+                            <TableCell>
+                              <Badge
+                                variant={
+                                  d.state === "OFFLINE"
+                                    ? "destructive"
+                                    : d.state === "TIMEOUT"
+                                    ? "secondary"
+                                    : "default"
+                                }
+                              >
+                                {d.state}
+                              </Badge>
+                            </TableCell>
                             <TableCell>{Math.round(d.rtt_ms)} ms</TableCell>
                             <TableCell>{Math.round(d.avg_ms)} ms</TableCell>
+                            <TableCell>{d.timeout_streak ?? 0}</TableCell>
+                            <TableCell>{ageText(d.updated_at_ms)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>

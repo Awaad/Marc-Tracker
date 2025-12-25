@@ -30,6 +30,7 @@ export type TrackerPoint = {
 };
 
 export type SnapshotDevice = {
+  timeout_streak: number;
   device_id: string;
   state: DeviceState;
   rtt_ms: number;
@@ -38,7 +39,7 @@ export type SnapshotDevice = {
 };
 
 export type TrackerSnapshot = {
-  devices: SnapshotDevice[];
+  devices: TrackerDevice[];
   device_count: number;
   median_ms: number;
   threshold_ms: number;
@@ -63,7 +64,6 @@ export type PlatformProbeOut = {
   read_lag_ms?: number | null;
 };
 
-
 export type ContactCreate = {
   platform: "mock" | "signal" | "whatsapp_web"; // keep cloud off for now
   target: string;
@@ -71,4 +71,22 @@ export type ContactCreate = {
   display_number?: string;
   avatar_url?: string | null;
   platform_meta?: Record<string, any>;
+};
+
+export type ContactCreatePayload = {
+  platform: "mock" | "signal" | "whatsapp_web"; 
+  target: string;
+  display_name: string;
+  display_number: string;
+  avatar_url: string | null;
+  platform_meta: Record<string, unknown>;
+};
+
+export type TrackerDevice = {
+  device_id: string;
+  state: string;
+  rtt_ms: number;
+  avg_ms: number;
+  updated_at_ms: number;
+  timeout_streak?: number;
 };
