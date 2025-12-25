@@ -24,6 +24,18 @@ async def session_scope():
         yield db
 
 
+def coerce_platform(raw: object) -> Platform:
+    # raw is commonly a string from DB
+    if isinstance(raw, Platform):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return Platform(raw)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Unsupported platform: {raw}")
+    raise HTTPException(status_code=400, detail=f"Invalid platform type: {type(raw)}")
+
+
 @router.post("/{contact_id}/start")
 async def start_tracking(
     contact_id: int,
@@ -34,9 +46,14 @@ async def start_tracking(
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
 
-    # For now, only wire mock in a clean, deterministic way.
-    # Next we’ll add Signal + WhatsApp adapters and choose based on contact.platform.
-    platform = contact.platform
+    platform = coerce_platform(contact.platform)
+
+    # Validate adapter is available BEFORE scheduling background runner
+    if not adapter_hub.supports(platform):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Adapter not available for platform '{platform.value}' (disabled or not registered)",
+        )
 
     async def runner() -> None:
         try:

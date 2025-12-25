@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from sys import platform
 from typing import Awaitable, Callable
 
 from app.adapters.base import BaseAdapter
@@ -42,6 +43,11 @@ class AdapterHub:
         if not entry:
             raise RuntimeError(f"No adapter registered for platform={platform.value}")
         return entry.factory(user_id, contact_id)
+    
+    
+    def supports(self, platform: Platform) -> bool:
+        return platform in self._entries
+
 
     async def init_all(self) -> None:
         # Start platform-wide adapter services (no-op for mock; later Signal/WhatsApp will use this)
