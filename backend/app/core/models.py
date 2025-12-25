@@ -6,6 +6,8 @@ from typing import Literal, Optional, Any
 from pydantic import BaseModel, Field
 
 from app.core.capabilities import Platform
+from app.settings import settings
+
 
 DeviceState = Literal["CALIBRATING", "ONLINE", "STANDBY", "OFFLINE"]
 
@@ -21,7 +23,10 @@ def capabilities_for(platform: Platform) -> Capabilities:
     if platform == Platform.sms:
         return Capabilities(delivery_receipts=True)
     if platform == Platform.whatsapp:
-        return Capabilities(delivery_receipts=True, read_receipts=True)
+        enabled = bool(settings.whatsapp_enabled and settings.whatsapp_phone_number_id and settings.whatsapp_access_token)
+        if not enabled:
+            return Capabilities(delivery_receipts=False, read_receipts=False, presence=False)
+        return Capabilities(delivery_receipts=True, read_receipts=True, presence=False)
     if platform == Platform.whatsapp_web:
     # best-effort: we treat “delivery-like” updates as possible
         return Capabilities(delivery_receipts=True, read_receipts=False, presence=False)

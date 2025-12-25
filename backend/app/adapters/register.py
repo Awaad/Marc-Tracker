@@ -12,6 +12,7 @@ from app.adapters.whatsapp_web.adapter import WhatsAppWebAdapter
 from app.adapters.whatsapp_web.service import whatsapp_web_service
 
 from app.core.capabilities import Platform
+from app.settings import settings
 
 
 def register_adapters() -> None:
@@ -35,14 +36,15 @@ def register_adapters() -> None:
         )
     )
 
-    adapter_hub.register(
-        AdapterEntry(
-            platform=Platform.whatsapp,
-            factory=lambda user_id, contact_id: WhatsAppAdapter(user_id=user_id, contact_id=contact_id),
-            start_all=whatsapp_service.start_all,
-            stop_all=whatsapp_service.stop_all,
+    if settings.whatsapp_enabled:
+        adapter_hub.register(
+            AdapterEntry(
+                platform=Platform.whatsapp,
+                factory=lambda user_id, contact_id: WhatsAppAdapter(user_id=user_id, contact_id=contact_id),
+                start_all=whatsapp_service.start_all,
+                stop_all=whatsapp_service.stop_all,
+            )
         )
-    )
 
     adapter_hub.register(
         AdapterEntry(
