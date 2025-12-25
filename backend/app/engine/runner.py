@@ -62,8 +62,18 @@ class ContactRunner:
                 )
                 self._timeout_tasks[probe.probe_id] = t
 
-                # small jitter to avoid periodic aliasing
-                await asyncio.sleep(self.interval_s + random.random() * 0.1)
+                # backoff jitter to avoid periodic aliasing
+                devices = self.correlator.snapshot_devices(self.user_id, self.contact_id)
+                primary = next((d for d in devices if d["device_id"] == "primary"), None)
+                streak = int((primary or {}).get("timeout_streak") or 0)
+
+                base = 2.0
+                if streak == 1:
+                    base = 3.0
+                elif streak >= 2:
+                    base = 5.0
+
+                await asyncio.sleep(base + random.random() * 0.15)
         finally:
             # stop receipt loop
             receipts_task.cancel()
