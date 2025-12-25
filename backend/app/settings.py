@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     whatsapp_verify_token: str | None = Field(default=None)
     whatsapp_app_secret: str | None = Field(default=None)
 
+    # WhatsApp Web (unofficial) adapter settings
+    whatsapp_web_enabled: bool = False
+    whatsapp_web_bridge_base: str = "http://localhost:8099"
+    whatsapp_web_bridge_ws: str = "ws://localhost:8099/events"
+
     def signal_ws_url(self) -> str:
         base = self.signal_rest_base.replace("https://", "wss://").replace("http://", "ws://")
         # websocket receive endpoint

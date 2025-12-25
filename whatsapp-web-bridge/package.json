@@ -1,0 +1,19 @@
+{
+  "name": "whatsapp-web-bridge",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "*",
+    "express": "*",
+    "ws": "*"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/ws": "^8.18.1",
+    "tsx": "*",
+    "typescript": "*"
+  }
+}

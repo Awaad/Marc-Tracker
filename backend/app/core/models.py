@@ -22,6 +22,9 @@ def capabilities_for(platform: Platform) -> Capabilities:
         return Capabilities(delivery_receipts=True)
     if platform == Platform.whatsapp:
         return Capabilities(delivery_receipts=True, read_receipts=True)
+    if platform == Platform.whatsapp_web:
+    # best-effort: we treat “delivery-like” updates as possible
+        return Capabilities(delivery_receipts=True, read_receipts=False, presence=False)
     if platform == Platform.signal:
         return Capabilities(delivery_receipts=True)
     if platform == Platform.telegram:

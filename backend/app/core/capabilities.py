@@ -6,6 +6,7 @@ class Platform(str, Enum):
     sms = "sms"
     telegram = "telegram"
     whatsapp = "whatsapp"
+    whatsapp_web = "whatsapp_web" 
     mock = "mock"
 
 
