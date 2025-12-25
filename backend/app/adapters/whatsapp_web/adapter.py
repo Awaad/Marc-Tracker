@@ -65,6 +65,7 @@ class WhatsAppWebAdapter(BaseAdapter):
                 probe_id=probe_id,
                 sent_at_ms=sent_at,
                 platform_message_id=message_id if isinstance(message_id, str) else None,
+                platform_message_ts=sent_at,
                 send_response=data,
             )
 

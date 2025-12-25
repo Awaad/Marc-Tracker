@@ -16,7 +16,7 @@ class ProbeRepo:
         platform: str,
         probe_id: str,
         sent_at_ms: int,
-        platform_message_ts: int | None,
+        platform_message_ts: int | None = None,
         platform_message_id: str | None = None,
         send_response: dict | None,
     ) -> None:
