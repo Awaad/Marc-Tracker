@@ -85,8 +85,9 @@ class Correlator:
             is_offline=dm.offline,
         )
 
-        if not dm.offline:
-            # First timeout: represent as TIMEOUT (useful for UI + analysis)
+        if dm.offline:
+            state = "OFFLINE"
+        else:
             state = "TIMEOUT"
 
         return {
@@ -156,7 +157,11 @@ class Correlator:
                 recent=dm.recent,
                 is_offline=dm.offline,
             )
-            if not dm.offline and dm.timeout_streak > 0:
+            
+            # deterministic overrides for reliability
+            if dm.offline:
+                state = "OFFLINE"
+            elif dm.timeout_streak > 0:
                 state = "TIMEOUT"
 
             out.append(
