@@ -4,6 +4,10 @@ from app.adapters.hub import AdapterEntry, adapter_hub
 from app.adapters.mock import MockAdapter
 from app.adapters.signal.adapter import SignalAdapter
 from app.adapters.signal.service import signal_service
+
+from app.adapters.whatsapp.adapter import WhatsAppAdapter
+from app.adapters.whatsapp.service import whatsapp_service
+
 from app.core.capabilities import Platform
 
 
@@ -17,7 +21,7 @@ def register_adapters() -> None:
             stop_all=None,
         )
     )
-    
+
 
     adapter_hub.register(
         AdapterEntry(
@@ -25,6 +29,15 @@ def register_adapters() -> None:
             factory=lambda user_id, contact_id: SignalAdapter(user_id=user_id, contact_id=contact_id),
             start_all=signal_service.start_all,
             stop_all=signal_service.stop_all,
+        )
+    )
+
+    adapter_hub.register(
+        AdapterEntry(
+            platform=Platform.whatsapp,
+            factory=lambda user_id, contact_id: WhatsAppAdapter(user_id=user_id, contact_id=contact_id),
+            start_all=whatsapp_service.start_all,
+            stop_all=whatsapp_service.stop_all,
         )
     )
 

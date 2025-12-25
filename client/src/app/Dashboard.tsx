@@ -66,7 +66,7 @@ export default function Dashboard() {
     <div className="min-h-screen p-6">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-semibold">Tracker</h1>
+          <h1 className="text-2xl font-semibold">Marc-Tracker</h1>
           <p className="text-sm text-muted-foreground">Contacts, live status, and history</p>
         </div>
         <Button variant="outline" onClick={logout}>Logout</Button>

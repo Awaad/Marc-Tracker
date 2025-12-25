@@ -17,6 +17,7 @@ class ProbeRepo:
         probe_id: str,
         sent_at_ms: int,
         platform_message_ts: int | None,
+        platform_message_id: str | None = None,
         send_response: dict | None,
     ) -> None:
         db.add(
@@ -27,6 +28,7 @@ class ProbeRepo:
                 probe_id=probe_id,
                 sent_at_ms=sent_at_ms,
                 platform_message_ts=platform_message_ts,
+                platform_message_id=platform_message_id,
                 send_response=send_response,
             )
         )
@@ -42,6 +44,19 @@ class ProbeRepo:
         stmt = select(PlatformProbe).where(
             PlatformProbe.platform == platform,
             PlatformProbe.platform_message_ts == platform_message_ts,
+        )
+        return await db.scalar(stmt)
+    
+    async def find_by_platform_message_id(
+        self,
+        db,
+        *,
+        platform: str,
+        platform_message_id: str,
+    ) -> PlatformProbe | None:
+        stmt = select(PlatformProbe).where(
+            PlatformProbe.platform == platform,
+            PlatformProbe.platform_message_id == platform_message_id,
         )
         return await db.scalar(stmt)
 

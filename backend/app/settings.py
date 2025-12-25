@@ -20,6 +20,15 @@ class Settings(BaseSettings):
     signal_rest_base: str = Field(default="http://localhost:8080")  # signal-cli-rest-api base
     signal_account: str | None = Field(default=None)               # The linked number
 
+    whatsapp_enabled: bool = Field(default=False)
+    whatsapp_graph_base: str = Field(default="https://graph.facebook.com/v21.0")
+    whatsapp_phone_number_id: str | None = Field(default=None)
+    whatsapp_access_token: str | None = Field(default=None)
+
+    # webhook verification + signature (used in commit 25)
+    whatsapp_verify_token: str | None = Field(default=None)
+    whatsapp_app_secret: str | None = Field(default=None)
+
     def signal_ws_url(self) -> str:
         base = self.signal_rest_base.replace("https://", "wss://").replace("http://", "ws://")
         # websocket receive endpoint

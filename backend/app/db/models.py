@@ -69,6 +69,8 @@ class PlatformProbe(Base):
     read_at_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     send_response: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    platform_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+
 
     __table_args__ = (
         Index("ix_platform_probe_unique", "platform", "probe_id", unique=True),
