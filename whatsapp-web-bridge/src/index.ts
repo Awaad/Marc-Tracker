@@ -11,6 +11,9 @@ app.use(express.json());
 const wss = new WebSocketServer({ noServer: true });
 const clients = new Set<any>();
 
+const presenceByJid = new Map<string, any>();
+
+
 wss.on("connection", (ws) => {
   clients.add(ws);
   ws.on("close", () => clients.delete(ws));
@@ -78,6 +81,15 @@ async function startSock() {
     }
   });
 
+  sock.ev.on("presence.update", (u: any) => {
+  // u.id is jid, u.presences contains device presence objects
+  try {
+    presenceByJid.set(String(u.id), u);
+    broadcast({ type: "wa:presence", jid: String(u.id), raw: u, ts: Date.now() });
+  } catch {}
+});
+
+
   sock.ev.on("messages.update", (updates: any[]) => {
     for (const u of updates) {
       const messageId = u?.key?.id;
@@ -113,5 +125,52 @@ app.get("/qr.png", async (_req, res) => {
   const png = await QRCode.toBuffer(lastQr);
   res.type("image/png").send(png);
 });
+
+app.get("/presence", async (req, res) => {
+  const to = String(req.query.to ?? "");
+  if (!to) return res.status(400).json({ error: "to required" });
+  if (!sock || !isOpen) return res.status(503).json({ error: "wa socket not connected" });
+
+  const jid = to.replace("+", "") + "@s.whatsapp.net";
+
+  try {
+    // ask WA for presence updates
+    await sock.presenceSubscribe(jid);
+
+    const raw = presenceByJid.get(jid) ?? null;
+    return res.json({ jid, raw });
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message ?? "presence failed" });
+  }
+});
+
+
+app.get("/profile", async (req, res) => {
+  const to = String(req.query.to ?? "");
+  if (!to) return res.status(400).json({ error: "to required" });
+
+  if (!sock || !isOpen) return res.status(503).json({ error: "wa socket not connected" });
+
+  const jid = to.replace("+", "") + "@s.whatsapp.net";
+
+  try {
+    const avatar_url = await sock.profilePictureUrl(jid, "image").catch(() => null);
+
+    // try to fetch "status/about" (may be limited by Baileys / WhatsApp)
+    // Many setups don't expose "about" reliably; keep as null.
+    const status_text = null;
+
+    // display_name is not reliably available for arbitrary JIDs unless you track contacts/messages.
+    const display_name = null;
+
+    const payload = { jid, avatar_url, display_name, status_text };
+    console.log("[bridge] /profile", payload); 
+    return res.json(payload);
+  } catch (e: any) {
+    console.error("[bridge] /profile error", e?.message ?? e);
+    return res.status(500).json({ error: "profile lookup failed" });
+  }
+});
+
 
 startSock().catch(console.error);
