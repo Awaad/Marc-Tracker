@@ -1,6 +1,11 @@
-export type Platform = "mock" | "signal" | "whatsapp" | "telegram" | "sms";
+export type Platform = "mock" | "signal" | "whatsapp" | "whatsapp_web" | "telegram" | "sms";
 
-export type DeviceState = "CALIBRATING" | "ONLINE" | "STANDBY" | "OFFLINE";
+export type DeviceState =
+  | "CALIBRATING"
+  | "ONLINE"
+  | "STANDBY"
+  | "TIMEOUT"
+  | "OFFLINE";
 
 export type Capabilities = {
   delivery_receipts: boolean;
@@ -27,19 +32,21 @@ export type TrackerPoint = {
   avg_ms: number;
   median_ms: number;
   threshold_ms: number;
+  timeout_streak?: number;
+  probe_id?: string | null;
 };
 
 export type SnapshotDevice = {
-  timeout_streak: number;
   device_id: string;
   state: DeviceState;
   rtt_ms: number;
   avg_ms: number;
   updated_at_ms: number;
+  timeout_streak: number;
 };
 
 export type TrackerSnapshot = {
-  devices: TrackerDevice[];
+  devices: SnapshotDevice[];
   device_count: number;
   median_ms: number;
   threshold_ms: number;
@@ -51,42 +58,11 @@ export type WsMessage =
   | { type: "tracker:snapshot"; contact_id: number; platform: Platform; snapshot: TrackerSnapshot }
   | { type: string; [k: string]: any };
 
-
-export type PlatformProbeOut = {
-  platform: string;
-  probe_id: string;
-  sent_at_ms: number;
-  platform_message_ts?: number | null;
-  platform_message_id?: string | null;
-  delivered_at_ms?: number | null;
-  read_at_ms?: number | null;
-  delivery_lag_ms?: number | null;
-  read_lag_ms?: number | null;
-};
-
-export type ContactCreate = {
-  platform: "mock" | "signal" | "whatsapp_web"; // keep cloud off for now
-  target: string;
-  display_name?: string;
-  display_number?: string;
-  avatar_url?: string | null;
-  platform_meta?: Record<string, any>;
-};
-
 export type ContactCreatePayload = {
-  platform: "mock" | "signal" | "whatsapp_web"; 
+  platform: "mock" | "signal" | "whatsapp_web"; // keep cloud off for now
   target: string;
   display_name: string;
   display_number: string;
   avatar_url: string | null;
   platform_meta: Record<string, unknown>;
-};
-
-export type TrackerDevice = {
-  device_id: string;
-  state: string;
-  rtt_ms: number;
-  avg_ms: number;
-  updated_at_ms: number;
-  timeout_streak?: number;
 };
