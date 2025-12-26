@@ -9,7 +9,7 @@ from app.core.capabilities import Platform
 from app.settings import settings
 
 
-DeviceState = Literal["CALIBRATING", "ONLINE", "STANDBY", "OFFLINE"]
+DeviceState = Literal["CALIBRATING", "ONLINE", "STANDBY", "OFFLINE", "TIMEOUT"]
 
 
 class Capabilities(BaseModel):
