@@ -3,8 +3,12 @@ import Login from "./app/Login";
 //import Register from "./app/Register";
 import { useAuth } from "./state/auth";
 import Dashboard from "./app/Dashboard";
+import { startNetVitals } from "./telemetry/netvitals";
+
 
 export default function App() {
+
+  startNetVitals();
   const token = useAuth((s) => s.token);
 
   return (
