@@ -12,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Input } from "../components/ui/input"; 
 import TrackerChart from "../components/TrackerChart";
-
+import { useNetVitals } from "../state/netvitals";
 
 
 export default function Dashboard() {
@@ -109,6 +109,8 @@ export default function Dashboard() {
   const h = Math.floor(m / 60);
   return `${h}h`;
 }
+
+const net = useNetVitals((s) => s.v);
 
   return (
     <div className="min-h-screen p-6">
@@ -328,6 +330,26 @@ export default function Dashboard() {
                 </div>
               </div>
             )}
+          </CardContent>
+        </Card>
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>NetVitals</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <div>effectiveType: {net.effectiveType ?? "-"}</div>
+              <div>rtt: {net.rtt ?? "-"} ms</div>
+              <div>downlink: {net.downlink ?? "-"} Mbps</div>
+              <div>updated: {Math.floor((Date.now() - (net.updated_at_ms ?? Date.now())) / 1000)}s ago</div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>CLS: {net.cls ?? "-"}</div>
+              <div>INP: {net.inp ? `${Math.round(net.inp)} ms` : "-"}</div>
+              <div>LCP: {net.lcp ? `${Math.round(net.lcp)} ms` : "-"}</div>
+              <div>FCP: {net.fcp ? `${Math.round(net.fcp)} ms` : "-"}</div>
+              <div>TTFB: {net.ttfb ? `${Math.round(net.ttfb)} ms` : "-"}</div>
+            </div>
           </CardContent>
         </Card>
       </div>
