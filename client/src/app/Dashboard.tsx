@@ -149,7 +149,7 @@ export default function Dashboard() {
   const rb = selectedPointsByDevice[effectiveDeviceId];
   const rawPoints = rb ? rb.toArray() : [];
 
-  // Commit 33: adjusted RTT for chart display (non-destructive)
+  // adjusted RTT for chart display (non-destructive)
   const chartPoints = useMemo(() => {
     if (!useAdjusted || !net.rtt) return rawPoints;
     return rawPoints.map((p: any) => ({
@@ -192,6 +192,77 @@ export default function Dashboard() {
   function platformBadge(p: string, isRunning: boolean) {
     return <Badge variant={isRunning ? "default" : "secondary"}>{p}</Badge>;
   }
+
+
+  function initials(name: string) {
+  const s = name.trim();
+  if (!s) return "?";
+  const parts = s.split(/\s+/).slice(0, 2);
+  return parts.map((p) => p[0]?.toUpperCase()).join("");
+}
+
+function Avatar({ url, label }: { url: string | null; label: string }) {
+  if (url) {
+    return (
+      <img
+        src={url}
+        alt={label}
+        className="w-10 h-10 rounded-full object-cover border"
+        referrerPolicy="no-referrer"
+      />
+    );
+  }
+  return (
+    <div className="w-10 h-10 rounded-full border flex items-center justify-center text-sm font-medium bg-muted">
+      {initials(label)}
+    </div>
+  );
+}
+
+
+function interpretInsights(opts: {
+  insights: any | undefined;
+  netStale: boolean;
+  hasNet: boolean;
+}) {
+  const i = opts.insights;
+  if (!i) return { verdict: "No insights yet.", bullets: ["Start tracking to collect samples."] };
+
+  const bullets: string[] = [];
+
+  const online = Number(i.online_ratio ?? 0);
+  const timeoutRate = Number(i.timeout_rate ?? 0);
+  const jitter = Number(i.jitter_ms ?? 0);
+  const median = Number(i.median_rtt_ms ?? 0);
+  const streak = Number(i.streak_max ?? 0);
+
+  let verdict = "Mixed signal.";
+
+  if (timeoutRate >= 0.2 || streak >= 2) {
+    verdict = "Frequent missed receipts.";
+    bullets.push("Likely unreachable periods, delivery delays, or app/device not responding.");
+  } else if (online >= 0.9 && jitter < 200) {
+    verdict = "Mostly reachable and stable.";
+    bullets.push("Good reliability with low variability.");
+  } else if (online >= 0.75) {
+    verdict = "Generally reachable, but variable.";
+    bullets.push("Some variability; occasional delays possible.");
+  } else {
+    verdict = "Intermittently reachable.";
+    bullets.push("Consider network instability, background restrictions, or device sleep.");
+  }
+
+  if (median > 0) bullets.push(`Typical latency ~${Math.round(median)}ms.`);
+  if (jitter >= 500) bullets.push("High jitter: results are volatile (network fluctuations likely).");
+  else if (jitter >= 250) bullets.push("Moderate jitter: expect occasional spikes.");
+
+  if (opts.hasNet && opts.netStale) bullets.push("Network confidence is stale; adjusted RTT may be misleading.");
+  if (!opts.hasNet) bullets.push("Network confidence unknown; use raw RTT carefully.");
+
+  return { verdict, bullets: bullets.slice(0, 3) };
+}
+
+const interp = interpretInsights({ insights: sessInsights, netStale, hasNet: Boolean(net.rtt) });
 
   return (
     <div className="min-h-screen p-6">
@@ -282,9 +353,14 @@ export default function Dashboard() {
                 >
                   <div className="flex items-center justify-between">
                     <div>
-                      <div className="font-medium">{c.display_name || c.target}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {c.platform} • {c.display_number}
+                      <div className="flex items-center gap-3">
+                        <Avatar url={c.avatar_url} label={c.display_name || c.target} />
+                        <div>
+                          <div className="font-medium">{c.display_name || c.target}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {c.platform} • {c.display_number}
+                          </div>
+                        </div>
                       </div>
                     </div>
                     <Badge variant={runningAny ? "default" : "secondary"}>
@@ -384,7 +460,7 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  {/* Platform selector (Commit 31) */}
+                  {/* Platform selector */}
                   <div className="flex items-center gap-2">
                     <div className="text-sm font-medium">Session</div>
                     <div className="w-56">
@@ -408,7 +484,7 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {/* Commit 33: network confidence + raw/adjusted toggle */}
+                {/* network confidence + raw/adjusted toggle */}
                 <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-lg border">
                   <div className="text-sm">
                     <span className="font-medium">Network confidence:</span>{" "}
@@ -425,7 +501,7 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {/* Commit 35: insights card */}
+                {/* insights card */}
                 <div className="p-3 rounded-lg border">
                   <div className="text-sm font-medium mb-2">Insights</div>
                   {sessInsights ? (
@@ -438,9 +514,16 @@ export default function Dashboard() {
                       <div>max timeout streak: {sessInsights.streak_max}</div>
                       <div>updated: {ageText(sessInsights.computed_at_ms)}</div>
                     </div>
+                    
                   ) : (
                     <p className="text-sm text-muted-foreground">No insights yet (start tracking)</p>
                   )}
+                  <div className="mt-2 text-sm">
+                    <div className="font-medium">{interp.verdict}</div>
+                    <ul className="list-disc pl-5 text-muted-foreground">
+                      {interp.bullets.map((b, idx) => <li key={idx}>{b}</li>)}
+                    </ul>
+                  </div>
                 </div>
 
                 <div>
