@@ -31,6 +31,9 @@ class Correlator:
     """
     Correlates sent probes with receipts and produces per-device and per-contact stats.
 
+    v2 change:
+    - State is now isolated per (user_id, contact_id, platform) to avoid mixing RTT distributions.
+
     Reliability rules (v1):
     - Receipt resets timeout_streak and sets offline=False
     - Timeout increments timeout_streak
@@ -40,19 +43,24 @@ class Correlator:
 
     def __init__(self, classifier: ClassifierV1) -> None:
         self.classifier = classifier
-        self._by_contact: dict[tuple[int, int], ContactMetrics] = {}
-        self._probe_sent_at: dict[tuple[int, int, str], int] = {}  # (user,contact,probe_id)->sent_ms
 
-    def is_probe_pending(self, user_id: int, contact_id: int, probe_id: str) -> bool:
-        return (user_id, contact_id, probe_id) in self._probe_sent_at
+        # (user, contact, platform) -> metrics
+        self._by_session: dict[tuple[int, int, str], ContactMetrics] = {}
 
-    def mark_probe_sent(self, user_id: int, contact_id: int, probe_id: str, sent_at_ms: int) -> None:
-        self._probe_sent_at[(user_id, contact_id, probe_id)] = sent_at_ms
+        # (user, contact, platform, probe_id) -> sent_ms
+        self._probe_sent_at: dict[tuple[int, int, str, str], int] = {}
+
+    def is_probe_pending(self, user_id: int, contact_id: int, platform: str, probe_id: str) -> bool:
+        return (user_id, contact_id, platform, probe_id) in self._probe_sent_at
+
+    def mark_probe_sent(self, user_id: int, contact_id: int, platform: str, probe_id: str, sent_at_ms: int) -> None:
+        self._probe_sent_at[(user_id, contact_id, platform, probe_id)] = sent_at_ms
 
     def mark_timeout(
         self,
         user_id: int,
         contact_id: int,
+        platform: str,
         *,
         probe_id: str,
         device_id: str,
@@ -64,21 +72,18 @@ class Correlator:
         - increments timeout streak
         - escalates to offline if streak >= 2
         """
-        key = (user_id, contact_id, probe_id)
-        # ensure we don't time out the same probe twice
+        key = (user_id, contact_id, platform, probe_id)
         self._probe_sent_at.pop(key, None)
 
-        cm = self._by_contact.setdefault((user_id, contact_id), ContactMetrics())
+        cm = self._by_session.setdefault((user_id, contact_id, platform), ContactMetrics())
         dm = cm.devices.setdefault(device_id, DeviceMetrics())
 
         dm.timeout_streak += 1
         dm.last_rtt = float(timeout_ms)
         dm.updated_at_ms = now_ms()
 
-        # escalate to OFFLINE after consecutive timeouts
         dm.offline = dm.timeout_streak >= 2
 
-        # classifier only understands offline boolean; we map first-timeout ourselves
         state, med, thr = self.classifier.classify(
             global_history=cm.global_history,
             recent=dm.recent,
@@ -103,17 +108,18 @@ class Correlator:
         self,
         user_id: int,
         contact_id: int,
+        platform: str,
         probe_id: str,
         device_id: str,
         received_at_ms: int,
     ) -> dict | None:
-        key = (user_id, contact_id, probe_id)
+        key = (user_id, contact_id, platform, probe_id)
         sent_at = self._probe_sent_at.pop(key, None)
         if sent_at is None:
-            return None  # unknown probe / already handled
+            return None
 
         rtt = float(max(0, received_at_ms - sent_at))
-        cm = self._by_contact.setdefault((user_id, contact_id), ContactMetrics())
+        cm = self._by_session.setdefault((user_id, contact_id, platform), ContactMetrics())
         dm = cm.devices.setdefault(device_id, DeviceMetrics())
 
         dm.offline = False
@@ -145,8 +151,8 @@ class Correlator:
             "timeout_streak": dm.timeout_streak,
         }
 
-    def snapshot_devices(self, user_id: int, contact_id: int) -> list[dict]:
-        cm = self._by_contact.get((user_id, contact_id))
+    def snapshot_devices(self, user_id: int, contact_id: int, platform: str) -> list[dict]:
+        cm = self._by_session.get((user_id, contact_id, platform))
         if not cm:
             return []
 
@@ -157,8 +163,7 @@ class Correlator:
                 recent=dm.recent,
                 is_offline=dm.offline,
             )
-            
-            # deterministic overrides for reliability
+
             if dm.offline:
                 state = "OFFLINE"
             elif dm.timeout_streak > 0:
@@ -176,8 +181,8 @@ class Correlator:
             )
         return out
 
-    def global_stats(self, user_id: int, contact_id: int) -> tuple[float, float]:
-        cm = self._by_contact.get((user_id, contact_id))
+    def global_stats(self, user_id: int, contact_id: int, platform: str) -> tuple[float, float]:
+        cm = self._by_session.get((user_id, contact_id, platform))
         if not cm:
             return (0.0, 0.0)
         return self.classifier.compute_threshold(cm.global_history)
