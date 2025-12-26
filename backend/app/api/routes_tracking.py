@@ -101,6 +101,7 @@ async def start_tracking(
                     adapter=adapter,
                     correlator=engine_runtime.correlator,
                     points_repo=engine_runtime.points_repo,
+                    insights=engine_runtime.insights,
                     db_factory=session_scope,
                     user_id=user.id,
                     contact_id=contact.id,

@@ -8,9 +8,9 @@ from typing import Dict
 
 from app.adapters.base import BaseAdapter
 from app.engine.correlator import Correlator
+from app.engine.insights import InsightsManager
 from app.realtime.manager import ws_manager
 from app.storage.points_repo import TrackerPointsRepo
-from app.engine.runtime import engine_runtime  
 
 log = logging.getLogger("app.engine")
 
@@ -26,6 +26,7 @@ class ContactRunner:
         adapter: BaseAdapter,
         correlator: Correlator,
         points_repo: TrackerPointsRepo,
+        insights: InsightsManager | None,
         db_factory,
         user_id: int,
         contact_id: int,
@@ -36,6 +37,7 @@ class ContactRunner:
         self.adapter = adapter
         self.correlator = correlator
         self.points_repo = points_repo
+        self.insights = insights
         self.db_factory = db_factory
         self.user_id = user_id
         self.contact_id = contact_id
@@ -54,7 +56,10 @@ class ContactRunner:
         try:
             while not self._stop.is_set():
                 probe = await self.adapter.send_probe(user_id=self.user_id, contact_id=self.contact_id)
-                self.correlator.mark_probe_sent(self.user_id, self.contact_id, self.platform, probe.probe_id, probe.sent_at_ms)
+
+                self.correlator.mark_probe_sent(
+                    self.user_id, self.contact_id, self.platform, probe.probe_id, probe.sent_at_ms
+                )
 
                 t = asyncio.create_task(
                     self._timeout_check(probe.probe_id, probe.sent_at_ms),
@@ -62,7 +67,6 @@ class ContactRunner:
                 )
                 self._timeout_tasks[probe.probe_id] = t
 
-                # backoff jitter based on platform-specific streak
                 devices = self.correlator.snapshot_devices(self.user_id, self.contact_id, self.platform)
                 primary = next((d for d in devices if d["device_id"] == "primary"), None)
                 streak = int((primary or {}).get("timeout_streak") or 0)
@@ -89,10 +93,7 @@ class ContactRunner:
                 except asyncio.CancelledError:
                     pass
                 except Exception:
-                    log.exception(
-                        "timeout task crashed",
-                        extra={"user_id": self.user_id, "contact_id": self.contact_id, "platform": self.platform},
-                    )
+                    log.exception("timeout task crashed", extra={"user_id": self.user_id, "contact_id": self.contact_id})
             self._timeout_tasks.clear()
 
     async def _timeout_check(self, probe_id: str, sent_at_ms: int) -> None:
@@ -183,33 +184,34 @@ class ContactRunner:
                 probe_id=probe_id,
             )
 
-        payload = {
-            "type": "tracker:point",
-            "contact_id": self.contact_id,
-            "platform": self.platform,
-            "point": {
-                "timestamp_ms": ts,
-                "device_id": device_id,
-                "state": state,
-                "rtt_ms": rtt_ms,
-                "avg_ms": avg_ms,
-                "median_ms": median_ms,
-                "threshold_ms": threshold_ms,
-                "timeout_streak": timeout_streak,
-                "probe_id": probe_id,
-                "platform": self.platform,
-            },
+        point_payload = {
+            "timestamp_ms": ts,
+            "device_id": device_id,
+            "state": state,
+            "rtt_ms": rtt_ms,
+            "avg_ms": avg_ms,
+            "median_ms": median_ms,
+            "threshold_ms": threshold_ms,
+            "timeout_streak": timeout_streak,
+            "probe_id": probe_id,
         }
 
-        await ws_manager.broadcast_to_user(self.user_id, payload)
+        await ws_manager.broadcast_to_user(
+            self.user_id,
+            {
+                "type": "tracker:point",
+                "contact_id": self.contact_id,
+                "platform": self.platform,
+                "point": point_payload,
+            },
+        )
 
-        # later use compute + broadcast insights (throttled)
-        try:
-            insights = engine_runtime.insights.observe_point(
+        if self.insights is not None:
+            insights = self.insights.observe_point(
                 user_id=self.user_id,
                 contact_id=self.contact_id,
                 platform=self.platform,
-                point=payload["point"],
+                point=point_payload,
             )
             if insights is not None:
                 await ws_manager.broadcast_to_user(
@@ -221,11 +223,6 @@ class ContactRunner:
                         "insights": insights,
                     },
                 )
-        except Exception:
-            log.exception(
-                "insights observe_point failed",
-                extra={"user_id": self.user_id, "contact_id": self.contact_id, "platform": self.platform},
-            )
 
     async def _broadcast_snapshot(self, devices: list[dict], median_ms: float, threshold_ms: float) -> None:
         await ws_manager.broadcast_to_user(
