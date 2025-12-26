@@ -10,6 +10,7 @@ from app.adapters.base import BaseAdapter
 from app.engine.correlator import Correlator
 from app.realtime.manager import ws_manager
 from app.storage.points_repo import TrackerPointsRepo
+from app.engine.runtime import engine_runtime  
 
 log = logging.getLogger("app.engine")
 
@@ -49,21 +50,20 @@ class ContactRunner:
         self._stop.set()
 
     async def run(self) -> None:
-        receipts_task = asyncio.create_task(self._receipt_loop(), name=f"receipts:{self.contact_id}")
+        receipts_task = asyncio.create_task(self._receipt_loop(), name=f"receipts:{self.contact_id}:{self.platform}")
         try:
             while not self._stop.is_set():
                 probe = await self.adapter.send_probe(user_id=self.user_id, contact_id=self.contact_id)
-                self.correlator.mark_probe_sent(self.user_id, self.contact_id, probe.probe_id, probe.sent_at_ms)
+                self.correlator.mark_probe_sent(self.user_id, self.contact_id, self.platform, probe.probe_id, probe.sent_at_ms)
 
-                # schedule timeout and keep a handle so we can cancel on receipt
                 t = asyncio.create_task(
                     self._timeout_check(probe.probe_id, probe.sent_at_ms),
-                    name=f"timeout:{self.contact_id}:{probe.probe_id}",
+                    name=f"timeout:{self.contact_id}:{self.platform}:{probe.probe_id}",
                 )
                 self._timeout_tasks[probe.probe_id] = t
 
-                # backoff jitter to avoid periodic aliasing
-                devices = self.correlator.snapshot_devices(self.user_id, self.contact_id)
+                # backoff jitter based on platform-specific streak
+                devices = self.correlator.snapshot_devices(self.user_id, self.contact_id, self.platform)
                 primary = next((d for d in devices if d["device_id"] == "primary"), None)
                 streak = int((primary or {}).get("timeout_streak") or 0)
 
@@ -75,14 +75,12 @@ class ContactRunner:
 
                 await asyncio.sleep(base + random.random() * 0.15)
         finally:
-            # stop receipt loop
             receipts_task.cancel()
             try:
                 await receipts_task
             except asyncio.CancelledError:
                 pass
 
-            # cancel any pending timeout tasks
             for task in list(self._timeout_tasks.values()):
                 task.cancel()
             for task in list(self._timeout_tasks.values()):
@@ -91,28 +89,30 @@ class ContactRunner:
                 except asyncio.CancelledError:
                     pass
                 except Exception:
-                    log.exception("timeout task crashed", extra={"user_id": self.user_id, "contact_id": self.contact_id})
+                    log.exception(
+                        "timeout task crashed",
+                        extra={"user_id": self.user_id, "contact_id": self.contact_id, "platform": self.platform},
+                    )
             self._timeout_tasks.clear()
 
     async def _timeout_check(self, probe_id: str, sent_at_ms: int) -> None:
         try:
             await asyncio.sleep(self.timeout_ms / 1000)
 
-            # only mark offline/timeout if probe is still pending
-            if not self.correlator.is_probe_pending(self.user_id, self.contact_id, probe_id):
+            if not self.correlator.is_probe_pending(self.user_id, self.contact_id, self.platform, probe_id):
                 return
 
-            # mark_timeout should both set state AND clear pending for probe_id
             result = self.correlator.mark_timeout(
                 self.user_id,
                 self.contact_id,
+                self.platform,
                 probe_id=probe_id,
                 device_id="primary",
                 timeout_ms=self.timeout_ms,
             )
 
-            med, thr = self.correlator.global_stats(self.user_id, self.contact_id)
-            devices = self.correlator.snapshot_devices(self.user_id, self.contact_id)
+            med, thr = self.correlator.global_stats(self.user_id, self.contact_id, self.platform)
+            devices = self.correlator.snapshot_devices(self.user_id, self.contact_id, self.platform)
 
             await self._persist_and_broadcast(
                 device_id="primary",
@@ -126,24 +126,22 @@ class ContactRunner:
             )
             await self._broadcast_snapshot(devices, med, thr)
         finally:
-            # cleanup
             self._timeout_tasks.pop(probe_id, None)
 
     async def _receipt_loop(self) -> None:
         async for r in self.adapter.receipts(user_id=self.user_id, contact_id=self.contact_id):
-            # cancel timeout if still scheduled
             t = self._timeout_tasks.pop(r.probe_id, None)
             if t is not None:
                 t.cancel()
 
             update = self.correlator.apply_receipt(
-                self.user_id, self.contact_id, r.probe_id, r.device_id, r.received_at_ms
+                self.user_id, self.contact_id, self.platform, r.probe_id, r.device_id, r.received_at_ms
             )
             if not update:
                 continue
 
-            devices = self.correlator.snapshot_devices(self.user_id, self.contact_id)
-            med, thr = self.correlator.global_stats(self.user_id, self.contact_id)
+            devices = self.correlator.snapshot_devices(self.user_id, self.contact_id, self.platform)
+            med, thr = self.correlator.global_stats(self.user_id, self.contact_id, self.platform)
 
             await self._persist_and_broadcast(
                 device_id=r.device_id,
@@ -185,25 +183,49 @@ class ContactRunner:
                 probe_id=probe_id,
             )
 
-        await ws_manager.broadcast_to_user(
-            self.user_id,
-            {
-                "type": "tracker:point",
-                "contact_id": self.contact_id,
+        payload = {
+            "type": "tracker:point",
+            "contact_id": self.contact_id,
+            "platform": self.platform,
+            "point": {
+                "timestamp_ms": ts,
+                "device_id": device_id,
+                "state": state,
+                "rtt_ms": rtt_ms,
+                "avg_ms": avg_ms,
+                "median_ms": median_ms,
+                "threshold_ms": threshold_ms,
+                "timeout_streak": timeout_streak,
+                "probe_id": probe_id,
                 "platform": self.platform,
-                "point": {
-                    "timestamp_ms": ts,
-                    "device_id": device_id,
-                    "state": state,
-                    "rtt_ms": rtt_ms,
-                    "avg_ms": avg_ms,
-                    "median_ms": median_ms,
-                    "threshold_ms": threshold_ms,
-                    "timeout_streak": timeout_streak,
-                    "probe_id": probe_id,
-                },
             },
-        )
+        }
+
+        await ws_manager.broadcast_to_user(self.user_id, payload)
+
+        # later use compute + broadcast insights (throttled)
+        try:
+            insights = engine_runtime.insights.observe_point(
+                user_id=self.user_id,
+                contact_id=self.contact_id,
+                platform=self.platform,
+                point=payload["point"],
+            )
+            if insights is not None:
+                await ws_manager.broadcast_to_user(
+                    self.user_id,
+                    {
+                        "type": "insights:update",
+                        "contact_id": self.contact_id,
+                        "platform": self.platform,
+                        "insights": insights,
+                    },
+                )
+        except Exception:
+            log.exception(
+                "insights observe_point failed",
+                extra={"user_id": self.user_id, "contact_id": self.contact_id, "platform": self.platform},
+            )
 
     async def _broadcast_snapshot(self, devices: list[dict], median_ms: float, threshold_ms: float) -> None:
         await ws_manager.broadcast_to_user(

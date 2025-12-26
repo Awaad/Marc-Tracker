@@ -5,6 +5,7 @@ from app.engine.bus import EventBus
 from app.engine.tracking_manager import TrackingManager
 from app.engine.classifier import ClassifierV1
 from app.engine.correlator import Correlator
+from app.engine.insights import InsightsManager
 from app.storage.points_repo import TrackerPointsRepo
 
 
@@ -19,6 +20,9 @@ class EngineRuntime:
         self.classifier = ClassifierV1()
         self.correlator = Correlator(self.classifier)
         self.points_repo = TrackerPointsRepo()
+
+       
+        self.insights = InsightsManager(window_size=600, broadcast_interval_ms=2000)
 
         self._consumer_task: asyncio.Task[None] | None = None
 
@@ -36,7 +40,6 @@ class EngineRuntime:
                 pass
 
     async def _consume_events(self) -> None:
-        # Now we log events. Later we persist, broadcast, etc.
         while True:
             event = await self.bus.next()
             log.info("engine-event", extra={"event": type(event).__name__})
