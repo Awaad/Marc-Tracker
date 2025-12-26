@@ -36,15 +36,66 @@ export const useTracker = create<TrackerState>((set, get) => ({
   setRunning: (ids) => set({ runningContactIds: new Set(ids) }),
 
   seedHistory: (contactId, history) => {
-    const grouped: Record<string, RingBuffer<TrackerPoint>> = {};
-    for (const p of history) {
-      grouped[p.device_id] ||= new RingBuffer<TrackerPoint>(MAX_POINTS);
-      grouped[p.device_id].push(p);
+  const grouped: Record<string, RingBuffer<TrackerPoint>> = {};
+  for (const p of history) {
+    grouped[p.device_id] ||= new RingBuffer<TrackerPoint>(MAX_POINTS);
+    grouped[p.device_id].push(p);
+  }
+
+  // derive snapshot from history (latest point per device)
+  const devices = Object.entries(grouped).map(([device_id, rb]) => {
+    const arr = rb.toArray();
+    const last = arr[arr.length - 1];
+
+    // compute streak if missing
+    let streak = last?.timeout_streak ?? 0;
+    if (streak === 0 && arr.length) {
+      let s = 0;
+      for (let i = arr.length - 1; i >= 0; i--) {
+        const st = arr[i].state;
+        if (st === "TIMEOUT" || st === "OFFLINE") s++;
+        else break;
+      }
+      streak = s;
     }
-    set((s) => ({
-      points: { ...s.points, [contactId]: grouped },
-    }));
-  },
+
+    return last
+      ? {
+          device_id,
+          state: last.state,
+          rtt_ms: last.rtt_ms,
+          avg_ms: last.avg_ms,
+          updated_at_ms: last.timestamp_ms,
+          timeout_streak: streak,
+        }
+      : null;
+  }).filter(Boolean) as any[];
+
+  const all = history.map((p) => p.rtt_ms).filter((x) => Number.isFinite(x));
+  const sorted = [...all].sort((a, b) => a - b);
+  const median_ms =
+    sorted.length < 3
+      ? 0
+      : sorted.length % 2
+      ? sorted[Math.floor(sorted.length / 2)]
+      : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
+
+  const threshold_ms = median_ms * 0.9;
+
+  set((s) => ({
+    points: { ...s.points, [contactId]: grouped },
+    snapshots: {
+      ...s.snapshots,
+      [contactId]: {
+        devices,
+        device_count: devices.length,
+        median_ms,
+        threshold_ms,
+      },
+    },
+  }));
+},
+
 
   applyWs: (msg) => {
     if (msg.type === "contacts:init") {
