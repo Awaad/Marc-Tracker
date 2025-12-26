@@ -183,7 +183,7 @@ export default function Dashboard() {
 
     const r = await apiFetch<any>("/tracking/running");
     if (r?.running) {
-      setRunning(r.running);
+      if (r?.running) setRunning(r.running);
     } else if (r?.contact_ids) {
       setRunning(Object.fromEntries((r.contact_ids as number[]).map((id) => [String(id), []])));
     } else {
@@ -352,9 +352,9 @@ export default function Dashboard() {
       </div>
 
       {/* 2 columns: contacts | right stack */}
-      <div className="grid grid-cols-1 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         {/* left */}
-        <Card className="l:col-span-2">
+        <Card className="lg:col-span-4">
           <CardHeader>
             <CardTitle>Contacts</CardTitle>
           </CardHeader>
@@ -371,7 +371,7 @@ export default function Dashboard() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="signal">signal</SelectItem>
-                    <SelectItem value="whatsapp_web">whatsapp</SelectItem>
+                    <SelectItem value="whatsapp_web">whatsapp_web</SelectItem>
                     <SelectItem value="mock">mock</SelectItem>
                   </SelectContent>
                 </Select>
@@ -466,7 +466,7 @@ export default function Dashboard() {
         </Card>
 
         {/* right: stacked */}
-        <div className="xl:col-span-3 space-y-4">
+        <div className="lg:col-span-8 space-y-4">
           {/* notice */}
           {notice ? (
             <div
