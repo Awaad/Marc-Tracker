@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 import httpx
 from sqlalchemy import select
@@ -36,17 +36,78 @@ class WhatsAppWebAdapter(BaseAdapter):
         await self._http.aclose()
         await self._service.unsubscribe(self.user_id, self.contact_id)
 
-    async def send_probe(self, *, user_id: int, contact_id: int) -> AdapterProbe:
-        if user_id != self.user_id or contact_id != self.contact_id:
-            raise RuntimeError("WhatsAppWebAdapter bound to different user/contact")
-
+    async def _get_recipient(self) -> str:
         async with SessionLocal() as db:
             c = await db.scalar(
                 select(ContactOrm).where(ContactOrm.id == self.contact_id, ContactOrm.user_id == self.user_id)
             )
             if not c:
                 raise RuntimeError("Contact not found for WhatsAppWebAdapter")
-            recipient = c.target
+            return c.target
+
+    async def get_profile(self, *, user_id: int, contact_id: int) -> Optional[dict]:
+        if user_id != self.user_id or contact_id != self.contact_id:
+            raise RuntimeError("WhatsAppWebAdapter bound to different user/contact")
+
+        recipient = await self._get_recipient()
+
+        try:
+            r = await self._http.get("/profile", params={"to": recipient})
+            if r.status_code == 404:
+                return None
+            r.raise_for_status()
+            data = r.json()
+        except httpx.HTTPError:
+            return None
+
+        if not isinstance(data, dict):
+            return None
+
+        avatar_url = data.get("avatar_url")
+        display_name = data.get("display_name")
+        status_text = data.get("status_text")
+
+        return {
+            "avatar_url": avatar_url if isinstance(avatar_url, str) else None,
+            "display_name": display_name if isinstance(display_name, str) else None,
+            "status_text": status_text if isinstance(status_text, str) else None,
+        }
+    
+    async def get_presence(self, *, user_id: int, contact_id: int):
+        if user_id != self.user_id or contact_id != self.contact_id:
+            raise RuntimeError("WhatsAppWebAdapter bound to different user/contact")
+
+        recipient = await self._get_recipient()
+        try:
+            r = await self._http.get("/presence", params={"to": recipient})
+            r.raise_for_status()
+            data = r.json()
+        except Exception:
+            return None
+
+        raw = data.get("raw") if isinstance(data, dict) else None
+        if not isinstance(raw, dict):
+            return "unknown"
+
+        # best-effort: many builds expose presence state nested under presences
+        presences = raw.get("presences")
+        if isinstance(presences, dict):
+            for _k, v in presences.items():
+                if isinstance(v, dict):
+                    if v.get("lastKnownPresence") == "available":
+                        return "online"
+                    if v.get("lastKnownPresence") == "unavailable":
+                        return "offline"
+
+        return "unknown"
+
+
+
+    async def send_probe(self, *, user_id: int, contact_id: int) -> AdapterProbe:
+        if user_id != self.user_id or contact_id != self.contact_id:
+            raise RuntimeError("WhatsAppWebAdapter bound to different user/contact")
+
+        recipient = await self._get_recipient()
 
         probe_id = uuid.uuid4().hex
         sent_at = now_ms()
