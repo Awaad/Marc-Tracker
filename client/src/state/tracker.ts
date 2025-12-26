@@ -27,6 +27,13 @@ function safeSetLS(key: string, value: string | null) {
   } catch {}
 }
 
+function normalizePlatformId(v: unknown): string {
+  if (typeof v !== "string") return "unknown";
+  if (v.startsWith("Platform.")) return v.slice("Platform.".length);
+  return v;
+}
+
+
 type TrackerState = {
   contacts: Contact[];
   selectedContactId: string | null;
@@ -170,7 +177,7 @@ export const useTracker = create<TrackerState>((set, get) => ({
 
     if (msg.type === "tracker:point") {
       const cid = String(msg.contact_id);
-      const plat = String(msg.platform ?? "unknown");
+      const plat = normalizePlatformId(msg.platform);
       const key = makeSessionKey(cid, plat);
       const p = msg.point;
 
@@ -195,7 +202,7 @@ export const useTracker = create<TrackerState>((set, get) => ({
 
     if (msg.type === "insights:update") {
       const cid = String(msg.contact_id);
-      const plat = String(msg.platform ?? "unknown");
+      const plat = normalizePlatformId(msg.platform);
       const key = makeSessionKey(cid, plat);
       set((s) => ({ insights: { ...s.insights, [key]: msg.insights } }));
       return;
