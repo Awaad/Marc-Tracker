@@ -118,9 +118,10 @@ class ContactRunner:
                 device_id="primary",
                 state=result["state"],
                 rtt_ms=float(self.timeout_ms),
-                avg_ms=result["avg_ms"],
-                median_ms=med,
-                threshold_ms=thr,
+                avg_ms=float(result["avg_ms"]),
+                median_ms=float(med),
+                threshold_ms=float(thr),
+                timeout_streak=int(result.get("timeout_streak", 0)),
                 probe_id=probe_id,
             )
             await self._broadcast_snapshot(devices, med, thr)
@@ -147,10 +148,11 @@ class ContactRunner:
             await self._persist_and_broadcast(
                 device_id=r.device_id,
                 state=update["state"],
-                rtt_ms=update["rtt_ms"],
-                avg_ms=update["avg_ms"],
-                median_ms=update["median_ms"],
-                threshold_ms=update["threshold_ms"],
+                rtt_ms=float(update["rtt_ms"]),
+                avg_ms=float(update["avg_ms"]),
+                median_ms=float(update["median_ms"]),
+                threshold_ms=float(update["threshold_ms"]),
+                timeout_streak=int(update.get("timeout_streak", 0)),
                 probe_id=r.probe_id,
             )
             await self._broadcast_snapshot(devices, med, thr)
@@ -164,6 +166,7 @@ class ContactRunner:
         avg_ms: float,
         median_ms: float,
         threshold_ms: float,
+        timeout_streak: int | None = None,
         probe_id: str | None = None,
     ) -> None:
         ts = now_ms()
@@ -196,6 +199,7 @@ class ContactRunner:
                     "avg_ms": avg_ms,
                     "median_ms": median_ms,
                     "threshold_ms": threshold_ms,
+                    "timeout_streak": timeout_streak,
                     "probe_id": probe_id,
                 },
             },
