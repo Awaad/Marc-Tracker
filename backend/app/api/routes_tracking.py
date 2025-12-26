@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,9 +36,21 @@ def coerce_platform(raw: object) -> Platform:
     raise HTTPException(status_code=400, detail=f"Invalid platform type: {type(raw)}")
 
 
+def parse_platform_from_request(query_platform: str | None, body: dict | None) -> str | None:
+    if query_platform:
+        return query_platform
+    if body and isinstance(body, dict):
+        v = body.get("platform")
+        if isinstance(v, str):
+            return v
+    return None
+
+
 @router.post("/{contact_id}/start")
 async def start_tracking(
     contact_id: int,
+    platform: str | None = Query(default=None),
+    body: dict | None = Body(default=None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
@@ -46,21 +58,31 @@ async def start_tracking(
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
 
-    platform = coerce_platform(contact.platform)
+    requested = parse_platform_from_request(platform, body)
 
-    # Validate adapter is available BEFORE scheduling background runner
-    if not adapter_hub.supports(platform):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Adapter not available for platform '{platform.value}' (disabled or not registered)",
-        )
+    # default keeps prior behavior (use contact.platform)
+    if not requested:
+        requested = str(getattr(contact, "platform", ""))
 
-    async def runner() -> None:
-        try:
-            adapter = adapter_hub.create(platform, user.id, contact.id)
-        except RuntimeError as e:
-            # log and stop quickly
-            raise RuntimeError(str(e))
+    if requested == "all":
+        # Start all platforms that are registered in adapter_hub.
+        # (we can add any extra filters here: e. exclude WhatsApp Cloud if you keep it disabled.)
+        to_start: list[Platform] = [p for p in Platform if adapter_hub.supports(p)]
+    else:
+        to_start = [coerce_platform(requested)]
+    
+    started: list[str] = []
+    for plat in to_start:
+        # Validate adapter is available BEFORE scheduling background runner
+        if not adapter_hub.supports(plat):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Adapter not available for platform '{plat.value}' (disabled or not registered)",
+            )
+
+    async def runner(p: Platform = plat) -> None:
+        adapter = adapter_hub.create(p, user.id, contact.id)
+        
         try:
             cr = ContactRunner(
                 adapter=adapter,
@@ -76,23 +98,45 @@ async def start_tracking(
         finally:
             await adapter.close()
 
-    await engine_runtime.tracking.start(user.id, contact.id, runner)
+    await engine_runtime.tracking.start_platform(user.id, contact.id, plat.value, runner)
+    started.append(plat.value)
     return {"ok": True}
 
 
 @router.post("/{contact_id}/stop")
-async def stop_tracking(contact_id: int, user: User = Depends(get_current_user)) -> dict:
-    await engine_runtime.tracking.stop(user.id, contact_id)
-    return {"ok": True}
+async def stop_tracking(
+    contact_id: int,
+    platform: str | None = Query(default=None),
+    body: dict | None = Body(default=None),
+    user: User = Depends(get_current_user),
+) -> dict:
+    requested = parse_platform_from_request(platform, body)
+    if requested == "all" or not requested:
+        await engine_runtime.tracking.stop_all_for_contact(user.id, contact_id)
+        return {"ok": True, "stopped": "all"}
 
+    plat = coerce_platform(requested)
+    await engine_runtime.tracking.stop_platform(user.id, contact_id, plat.value)
+    return {"ok": True, "stopped": plat.value}
+ 
 
 @router.get("/running")
 async def running(user: User = Depends(get_current_user)) -> dict:
-    contact_ids = await engine_runtime.tracking.list_running(user.id)
-    return {"contact_ids": contact_ids}
+    running_map = await engine_runtime.tracking.list_running(user.id)
+    # JSON: keys must be strings
+    return {"running": {str(cid): platforms for cid, platforms in running_map.items()}}
 
 
 @router.get("/{contact_id}/status")
-async def status(contact_id: int, user: User = Depends(get_current_user)) -> dict:
-    is_running = await engine_runtime.tracking.is_running(user.id, contact_id)
-    return {"contact_id": contact_id, "running": is_running}
+async def status(
+    contact_id: int,
+    platform: str | None = Query(default=None),
+    user: User = Depends(get_current_user),
+) -> dict:
+    if platform:
+        plat = coerce_platform(platform)
+        is_running = await engine_runtime.tracking.is_running_platform(user.id, contact_id, plat.value)
+        return {"contact_id": contact_id, "platform": plat.value, "running": is_running}
+
+    is_running_any = await engine_runtime.tracking.is_running(user.id, contact_id)
+    return {"contact_id": contact_id, "running": is_running_any}
