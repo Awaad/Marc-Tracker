@@ -18,23 +18,35 @@ def now_ms() -> int:
     return int(time.time() * 1000)
 
 
+
+def _as_int(v: object) -> int | None:
+    if isinstance(v, (int, float)):
+        return int(v)
+    if isinstance(v, str):
+        s = v.strip()
+        if s.isdigit():
+            return int(s)
+    return None
+
+
 def extract_message_ts(send_response: dict) -> int | None:
     # best-effort: shape depends on signal-cli-rest-api version
     for key in ("timestamp", "messageTimestamp", "sentTimestamp"):
-        v = send_response.get(key)
-        if isinstance(v, (int, float)):
-            return int(v)
+        ts = _as_int(send_response.get(key))
+        if ts is not None:
+            return ts
 
     results = send_response.get("results")
     if isinstance(results, list) and results:
         r0 = results[0]
         if isinstance(r0, dict):
             for key in ("timestamp", "messageTimestamp", "sentTimestamp"):
-                v = r0.get(key)
-                if isinstance(v, (int, float)):
-                    return int(v)
+                ts = _as_int(r0.get(key))
+                if ts is not None:
+                    return ts
 
     return None
+
 
 
 class SignalAdapter(BaseAdapter):
