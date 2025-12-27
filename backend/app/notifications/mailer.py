@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import smtplib
+import logging
 from email.message import EmailMessage
 from typing import Iterable
+from functools import partial
 
 from app.settings import settings
+
+log = logging.getLogger("app.mailer")
 
 
 def _send_email_sync(*, to: str, subject: str, text: str) -> None:
@@ -17,6 +22,10 @@ def _send_email_sync(*, to: str, subject: str, text: str) -> None:
     mail_from = getattr(settings, "smtp_from", None)
 
     if not host or not mail_from or not to:
+        log.warning(
+            "email skipped (missing smtp_host/smtp_from/to)",
+            extra={"to": to, "smtp_host": host, "smtp_from": mail_from},
+        )
         return
 
     msg = EmailMessage()
@@ -34,13 +43,21 @@ def _send_email_sync(*, to: str, subject: str, text: str) -> None:
 
 
 def send_email_background(*, to: str, subject: str, text: str) -> None:
-    # Fire-and-forget in a thread, do not block requests.
+    async def _runner():
+        try:
+            await asyncio.to_thread(_send_email_sync, to=to, subject=subject, text=text)
+        except Exception:
+            log.exception("email send failed", extra={"to": to, "subject": subject})
+
     try:
         loop = asyncio.get_running_loop()
-        loop.run_in_executor(None, _send_email_sync, to=to, subject=subject, text=text)
+        loop.create_task(_runner())
     except RuntimeError:
-        # No running loop (rare), just send synchronously.
-        _send_email_sync(to=to, subject=subject, text=text)
+        # no running loop
+        try:
+            _send_email_sync(to=to, subject=subject, text=text)
+        except Exception:
+            log.exception("email send failed (no loop)", extra={"to": to, "subject": subject})
 
 
 def send_email_background_many(*, to_list: Iterable[str], subject: str, text: str) -> None:
