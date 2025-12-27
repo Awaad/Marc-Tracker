@@ -41,17 +41,22 @@ class NotifyManager:
         if not ctx.notify_enabled:
             return
 
-        if prev != "OFFLINE":
-            return
-        if new_state not in ONLINE_STATES:
+        if prev is None:
             return
 
-        subject = f"✅ {ctx.contact_label} is back online ({new_state})"
+        was_online = prev in ONLINE_STATES
+        now_online = new_state in ONLINE_STATES
+
+        # Notify when transitioning from NOT-online → online-ish
+        if was_online or not now_online:
+            return
+
+        subject = f" {ctx.contact_label} is online ({new_state})"
         text = (
             f"Contact: {ctx.contact_label}\n"
             f"Target: {ctx.contact_target}\n"
             f"Platform: {ctx.platform}\n"
-            f"Transition: OFFLINE → {new_state}\n\n"
+            f"Transition: {prev} → {new_state}\n\n"
             f"RTT: {round(rtt_ms)} ms\n"
             f"Avg: {round(avg_ms)} ms\n"
             f"Median: {round(median_ms)} ms\n"
@@ -59,4 +64,9 @@ class NotifyManager:
             f"Timeout streak: {int(timeout_streak or 0)}\n"
             f"At(ms): {at_ms}\n"
         )
-        send_email_background(to=ctx.user_email, subject=subject, text=text)
+        
+        try:
+            send_email_background(to=ctx.user_email, subject=subject, text=text)
+        except Exception:
+            import logging
+            logging.getLogger("app.notify").exception("notify failed", extra={"user_id": ctx.user_id, "contact_id": ctx.contact_id})

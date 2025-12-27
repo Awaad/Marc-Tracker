@@ -16,6 +16,14 @@ from app.adapters.hub import adapter_hub
 router = APIRouter(prefix="/contacts", tags=["contacts"])
 
 
+class ContactUpdate(BaseModel):
+    display_name: str | None = None
+    avatar_url: str | None = None
+    platform_meta: dict | None = None
+    notify_online: bool | None = None
+
+
+
 @router.get("", response_model=list[ContactOut])
 async def list_contacts(
     user: User = Depends(get_current_user),
@@ -160,3 +168,41 @@ async def set_notify_online(
     c.notify_online = bool(payload.enabled)
     await db.commit()
     return {"ok": True, "enabled": c.notify_online}
+
+
+
+@router.patch("/{contact_id}", response_model=ContactOut)
+async def update_contact(
+    contact_id: int,
+    payload: ContactUpdate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ContactOut:
+    c = await db.scalar(select(ContactOrm).where(ContactOrm.id == contact_id, ContactOrm.user_id == user.id))
+    if not c:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    if payload.display_name is not None:
+        c.display_name = payload.display_name
+    if payload.avatar_url is not None:
+        c.avatar_url = payload.avatar_url
+    if payload.platform_meta is not None:
+        c.platform_meta_json = json.dumps(payload.platform_meta or {}, ensure_ascii=False)
+    if payload.notify_online is not None:
+        c.notify_online = bool(payload.notify_online)
+
+    await db.commit()
+    await db.refresh(c)
+
+    plat = Platform(c.platform)
+    return ContactOut(
+        id=str(c.id),
+        platform=plat,
+        target=c.target,
+        display_name=c.display_name or "",
+        display_number=c.display_number or "",
+        avatar_url=c.avatar_url,
+        platform_meta=json.loads(c.platform_meta_json or "{}"),
+        notify_online=bool(getattr(c, "notify_online", False)),
+        capabilities=capabilities_for(plat),
+    )

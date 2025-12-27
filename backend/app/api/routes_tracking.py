@@ -1,7 +1,8 @@
 from contextlib import asynccontextmanager
+import time
 
-from backend.app import settings
-from backend.app.notifications.mailer import send_email_background
+from app import settings
+from app.notifications.mailer import send_email_background
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +13,8 @@ from app.db.session import SessionLocal
 from app.engine.runtime import engine_runtime
 from app.engine.runner import ContactRunner
 
-from app.notifications.notify_manager import NotifyManager, NotifyContext
+from app.notifications.notify_manager import NotifyContext
+from app.notifications.admin_notify import notify_admin_tracking_start
 
 from app.adapters.hub import adapter_hub
 from app.core.capabilities import Platform
@@ -97,20 +99,20 @@ async def start_tracking(
                 status_code=400,
                 detail=f"Adapter not available for platform '{plat.value}' (disabled or not registered)",
             )
+        
 
         async def runner(p: Platform = plat) -> None:
             adapter = adapter_hub.create(p, user.id, contact.id)
             try:
                 notify_ctx = NotifyContext(
-                    user_id=user.id,
-                    user_email=user.email,
-                    contact_id=contact.id,
-                    contact_label=(contact.display_name or contact.target),
-                    contact_target=contact.target,
-                    platform=p.value,  
-                    notify_enabled=bool(getattr(contact, "notify_online", False)),
-                )
-
+                user_id=user.id,
+                user_email=user.email,
+                contact_id=contact.id,
+                contact_label=(contact.display_name or contact.target),
+                contact_target=contact.target,
+                platform=p.value,
+                notify_enabled=bool(getattr(contact, "notify_online", False)),
+            )
                 cr = ContactRunner(
                     adapter=adapter,
                     correlator=engine_runtime.correlator,
@@ -121,9 +123,20 @@ async def start_tracking(
                     db_factory=session_scope,
                     user_id=user.id,
                     contact_id=contact.id,
-                    platform=p.value,  
+                    platform=p.value,
                     timeout_ms=10_000,
                 )
+
+                # Send "started" email AFTER the runner was created successfully
+                notify_admin_tracking_start(
+                    user_email=user.email,
+                    user_id=user.id,
+                    contact_id=contact.id,
+                    contact_label=(contact.display_name or contact.target),
+                    platform=p.value,
+                    when_ms=int(time.time() * 1000),
+                )
+
                 await cr.run()
             finally:
                 await adapter.close()
