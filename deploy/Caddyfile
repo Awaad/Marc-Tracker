@@ -1,18 +1,14 @@
 gibmirdeinfinger.com {
   encode gzip zstd
 
-  # WebSocket endpoint used by useTrackerWs(): /ws?token=...
+  # WebSocket: /ws?token=...
   @ws path /ws*
-  reverse_proxy @ws backend:8000 {
-  header_up X-Forwarded-Proto {scheme}
-  header_up X-Forwarded-For {remote_host}
-  header_up X-Forwarded-Host {host}
-}
+  reverse_proxy @ws backend:8000
 
-  # All backend REST routes (no /api prefix)
+  # Backend REST routes (no /api prefix)
   @api path /auth/* /contacts* /tracking* /netvitals* /health* /docs* /openapi.json
   reverse_proxy @api backend:8000
 
   # Everything else -> React static site
-  reverse_proxy frontend:80
+  reverse_proxy client:80
 }

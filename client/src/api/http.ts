@@ -1,4 +1,10 @@
-export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
+const isLocalhost =
+  typeof window !== "undefined" &&
+  (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+
+export const API_BASE =
+  import.meta.env.VITE_API_BASE ??
+  (isLocalhost ? "http://localhost:8000" : window.location.origin);
 
 export function getToken(): string | null {
   return localStorage.getItem("token");
@@ -9,10 +15,7 @@ export function setToken(token: string | null) {
   else localStorage.setItem("token", token);
 }
 
-export async function apiFetch<T>(
-  path: string,
-  init: RequestInit = {}
-): Promise<T> {
+export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers = new Headers(init.headers || {});
   headers.set("Content-Type", "application/json");
@@ -27,7 +30,5 @@ export async function apiFetch<T>(
 }
 
 export function wsBaseUrl(): string {
-  // http://localhost:8000 -> ws://localhost:8000
-  // https://... -> wss://...
   return API_BASE.replace(/^http/, "ws");
 }
