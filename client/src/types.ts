@@ -22,6 +22,7 @@ export type Contact = {
   avatar_url: string | null;
   platform_meta: Record<string, any>;
   capabilities: Capabilities;
+  notify_online?: boolean;
 };
 
 export type TrackerPoint = {

@@ -13,8 +13,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Input } from "../components/ui/input";
 import TrackerChart from "../components/TrackerChart";
 import { useNetVitals } from "../state/netvitals";
+import { LyricsNowPlaying } from "@/components/LyricsNowPlaying";
 
-const SUPPORTED_PLATFORMS: ContactCreatePayload["platform"][] = ["signal", "whatsapp_web", "mock"];
+const ONLY_PLATFORM: Platform = "whatsapp_web";
+
+function platformLabel(p: string) {
+  return p === "whatsapp_web" ? "whatsapp" : p;
+}
 
 function ageText(ms: number | undefined) {
   if (!ms) return "-";
@@ -107,16 +112,7 @@ function interpretInsights(opts: { insights: any | undefined; netStale: boolean;
   return { verdict, bullets: bullets.slice(0, 3) };
 }
 
-type BusyKey =
-  | null
-  | "create"
-  | "refresh"
-  | "start"
-  | "stop"
-  | "start_all"
-  | "stop_all"
-  | "refresh_profile"
-  | "delete";
+type BusyKey = null | "create" | "refresh" | "start" | "stop" | "refresh_profile" | "delete" | "notify";
 
 export default function Dashboard() {
   const logout = useAuth((s) => s.logout);
@@ -139,8 +135,7 @@ export default function Dashboard() {
 
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>("primary");
 
-  // add contact
-  const [newPlatform, setNewPlatform] = useState<ContactCreatePayload["platform"]>("whatsapp_web");
+  // add contact (WhatsApp only)
   const [newTarget, setNewTarget] = useState<string>("");
   const [newDisplayName, setNewDisplayName] = useState<string>("");
 
@@ -183,16 +178,21 @@ export default function Dashboard() {
 
     const r = await apiFetch<any>("/tracking/running");
     if (r?.running) {
-      if (r?.running) setRunning(r.running);
+      setRunning(r.running);
     } else if (r?.contact_ids) {
       setRunning(Object.fromEntries((r.contact_ids as number[]).map((id) => [String(id), []])));
     } else {
       setRunning({});
     }
 
+    // Force platform to WhatsApp-only session
     if (!selectedContactId && c.length) {
-      setSelected(c[0].id);
-      setSelectedPlatform(c[0].platform);
+      const firstWa = c.find((x) => x.platform === ONLY_PLATFORM) ?? c[0];
+      setSelected(firstWa.id);
+      setSelectedPlatform(ONLY_PLATFORM);
+    } else {
+      // Always pin to whatsapp_web
+      if (selectedPlatform !== ONLY_PLATFORM) setSelectedPlatform(ONLY_PLATFORM);
     }
   }
 
@@ -201,57 +201,50 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setContacts, setRunning]);
 
+  const whatsappContacts = useMemo(() => contacts.filter((c) => c.platform === ONLY_PLATFORM), [contacts]);
+
   const filteredContacts = useMemo(() => {
     const s = String(q ?? "").trim().toLowerCase();
-    if (!s) return contacts;
-    return contacts.filter((c) => {
+    const base = whatsappContacts;
+    if (!s) return base;
+    return base.filter((c) => {
       const name = String(c.display_name ?? "").toLowerCase();
       const target = String(c.target ?? "").toLowerCase();
-      const plat = String(c.platform ?? "").toLowerCase();
-      return name.includes(s) || target.includes(s) || plat.includes(s);
+      return name.includes(s) || target.includes(s);
     });
-  }, [contacts, q]);
+  }, [whatsappContacts, q]);
 
   const selected = useMemo(
-    () => contacts.find((c) => c.id === selectedContactId) ?? null,
-    [contacts, selectedContactId]
+    () => whatsappContacts.find((c) => c.id === selectedContactId) ?? null,
+    [whatsappContacts, selectedContactId]
   );
 
-  // keep/choose platform
+  // Pin platform always (no selector)
   useEffect(() => {
-    if (!selected) return;
-
-    const rset = running[selected.id];
-    const keep = selectedPlatform && rset?.has(String(selectedPlatform));
-    if (keep) return;
-
-    const pickRunning = rset && rset.size ? ([...rset][0] as Platform) : null;
-    const fallback = (pickRunning ?? selected.platform) as Platform;
-
-    if (selectedPlatform !== fallback) setSelectedPlatform(fallback);
+    if (selectedPlatform !== ONLY_PLATFORM) setSelectedPlatform(ONLY_PLATFORM);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected?.id, running]);
+  }, [selectedContactId]);
 
-  // history per session
+  // history per session (WhatsApp-only)
   useEffect(() => {
-    if (!selectedContactId || !selectedPlatform) return;
+    if (!selectedContactId) return;
 
     (async () => {
       const hist = await apiFetch<TrackerPoint[]>(`/contacts/${selectedContactId}/points?limit=300`);
       const filtered = (hist as any[]).filter((p) => {
         const pPlat = (p as any).platform;
-        if (!pPlat) return true;
-        return String(pPlat) === String(selectedPlatform);
+        if (!pPlat) return true; // legacy points
+        return String(pPlat) === String(ONLY_PLATFORM);
       });
-      seedHistory(selectedContactId, selectedPlatform, filtered as any);
+      seedHistory(selectedContactId, ONLY_PLATFORM, filtered as any);
     })().catch(console.error);
-  }, [selectedContactId, selectedPlatform, seedHistory]);
+  }, [selectedContactId, seedHistory]);
 
   useEffect(() => {
     setSelectedDeviceId("primary");
-  }, [selectedContactId, selectedPlatform]);
+  }, [selectedContactId]);
 
-  const sessionKey = selectedContactId && selectedPlatform ? `${selectedContactId}:${selectedPlatform}` : null;
+  const sessionKey = selectedContactId ? `${selectedContactId}:${ONLY_PLATFORM}` : null;
 
   const selectedSnapshot = sessionKey ? snapshots[sessionKey] : undefined;
   const selectedPointsByDevice = sessionKey ? points[sessionKey] ?? {} : {};
@@ -275,15 +268,14 @@ export default function Dashboard() {
   const interp = interpretInsights({ insights: sessInsights, netStale, hasNet: Boolean(net.rtt) });
 
   const selectedRunningSet = selected ? running[selected.id] : undefined;
-  const selectedIsRunning =
-    selected && selectedPlatform ? Boolean(selectedRunningSet?.has(String(selectedPlatform))) : false;
+  const selectedIsRunning = selected ? Boolean(selectedRunningSet?.has(String(ONLY_PLATFORM))) : false;
 
   async function createContact() {
     const target = newTarget.trim();
     if (!target) return;
 
     const payload: ContactCreatePayload = {
-      platform: newPlatform,
+      platform: "whatsapp_web",
       target,
       display_name: newDisplayName.trim(),
       display_number: target,
@@ -301,7 +293,7 @@ export default function Dashboard() {
 
     await refreshContactsAndRunning();
     setSelected(created.id);
-    setSelectedPlatform(created.platform);
+    setSelectedPlatform(ONLY_PLATFORM);
   }
 
   async function deleteSelectedContact() {
@@ -312,10 +304,10 @@ export default function Dashboard() {
     await apiFetch(`/contacts/${selected.id}`, { method: "DELETE" });
     await refreshContactsAndRunning();
 
-    const remaining = contacts.filter((c) => c.id !== selected.id);
+    const remaining = whatsappContacts.filter((c) => c.id !== selected.id);
     const next = remaining[0] ?? null;
     setSelected(next ? next.id : null);
-    if (next) setSelectedPlatform(next.platform);
+    if (next) setSelectedPlatform(ONLY_PLATFORM);
   }
 
   async function refreshProfileSelected() {
@@ -324,19 +316,29 @@ export default function Dashboard() {
     await refreshContactsAndRunning();
   }
 
-  async function startSelected(platform: Platform | "all") {
+  async function startSelected() {
     if (!selected) return;
-    await apiFetch(`/tracking/${selected.id}/start?platform=${encodeURIComponent(platform)}`, { method: "POST" });
+    await apiFetch(`/tracking/${selected.id}/start?platform=${encodeURIComponent(ONLY_PLATFORM)}`, { method: "POST" });
     await refreshContactsAndRunning();
   }
 
-  async function stopSelected(platform: Platform | "all") {
+  async function stopSelected() {
     if (!selected) return;
-    await apiFetch(`/tracking/${selected.id}/stop?platform=${encodeURIComponent(platform)}`, { method: "POST" });
+    await apiFetch(`/tracking/${selected.id}/stop?platform=${encodeURIComponent(ONLY_PLATFORM)}`, { method: "POST" });
+    await refreshContactsAndRunning();
+  }
+
+  async function toggleNotifyOnline(next: boolean) {
+    if (!selected) return;
+    await apiFetch(`/contacts/${selected.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ notify_online: next }),
+    });
     await refreshContactsAndRunning();
   }
 
   const statusText = selected ? ((selected.platform_meta as any)?.status_text as string | undefined) : undefined;
+  const notifyEnabled = Boolean((selected as any)?.notify_online);
 
   return (
     <div className="min-h-screen p-6">
@@ -344,8 +346,16 @@ export default function Dashboard() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-semibold">Marc-Tracker</h1>
-          <p className="text-sm text-muted-foreground">Contacts, per-platform sessions, history, and insights</p>
         </div>
+        <div className="mt-2">
+            <LyricsNowPlaying
+              src="/lyrics/gibmirdeinfinger.txt"
+              autoPlay
+              loop
+              defaultLinesPerMinute={12}
+              fadeMs={450}
+            />
+          </div>
         <Button variant="outline" onClick={logout}>
           Logout
         </Button>
@@ -364,24 +374,13 @@ export default function Dashboard() {
             <div className="p-3 rounded-lg border space-y-2">
               <div className="text-sm font-medium">Add contact</div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <Select value={newPlatform} onValueChange={(v) => setNewPlatform(v as ContactCreatePayload["platform"])}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Platform" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="signal">signal</SelectItem>
-                    <SelectItem value="whatsapp_web">whatsapp_web</SelectItem>
-                    <SelectItem value="mock">mock</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="text-xs text-muted-foreground">Platform: whatsapp</div>
 
-                <Input
-                  placeholder="Target (e.g. +905...)"
-                  value={newTarget}
-                  onChange={(e) => setNewTarget(e.target.value)}
-                />
-              </div>
+              <Input
+                placeholder="Target (e.g. +905...)"
+                value={newTarget}
+                onChange={(e) => setNewTarget(e.target.value)}
+              />
 
               <Input
                 placeholder="Display name (optional)"
@@ -409,11 +408,11 @@ export default function Dashboard() {
               </div>
 
               <div className="text-xs text-muted-foreground">
-                WhatsApp Cloud disabled for now; use whatsapp_web bridge or signal.
+                WhatsApp Cloud disabled for now; using whatsapp_web bridge.
               </div>
             </div>
 
-            {/* search (fixed) */}
+            {/* search */}
             <Input
               placeholder="Search contacts…"
               value={q}
@@ -425,7 +424,7 @@ export default function Dashboard() {
             <div className="space-y-2">
               {filteredContacts.map((c) => {
                 const rset = running[c.id];
-                const runningAny = Boolean(rset && rset.size);
+                const isRunning = Boolean(rset?.has(String(ONLY_PLATFORM)));
                 const name = c.display_name || c.target;
 
                 return (
@@ -436,8 +435,7 @@ export default function Dashboard() {
                     }`}
                     onClick={() => {
                       setSelected(c.id);
-                      const pick = rset && rset.size ? ([...rset][0] as Platform) : (c.platform as Platform);
-                      setSelectedPlatform(pick);
+                      setSelectedPlatform(ONLY_PLATFORM);
                     }}
                   >
                     <div className="flex items-center gap-3">
@@ -445,12 +443,12 @@ export default function Dashboard() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-2">
                           <div className="font-medium truncate">{name}</div>
-                          <Badge variant={runningAny ? "default" : "secondary"} className="shrink-0">
-                            {runningAny ? `${rset!.size} running` : "stopped"}
+                          <Badge variant={isRunning ? "default" : "secondary"} className="shrink-0">
+                            {isRunning ? "running" : "stopped"}
                           </Badge>
                         </div>
                         <div className="text-xs text-muted-foreground truncate">
-                          {c.platform} • {c.target}
+                          {platformLabel(c.platform)} • {c.target}
                         </div>
                       </div>
                     </div>
@@ -459,7 +457,11 @@ export default function Dashboard() {
               })}
 
               {filteredContacts.length === 0 && (
-                <div className="text-sm text-muted-foreground p-2">No contacts match your search.</div>
+                <div className="text-sm text-muted-foreground p-2">
+                  {whatsappContacts.length === 0
+                    ? "No WhatsApp contacts yet. Add one above."
+                    : "No contacts match your search."}
+                </div>
               )}
             </div>
           </CardContent>
@@ -493,14 +495,9 @@ export default function Dashboard() {
                       <div>
                         <div className="text-lg font-semibold">{selected.display_name || selected.target}</div>
                         <div className="text-sm text-muted-foreground">
-                          {selected.platform} • {selected.target}
+                          {platformLabel(selected.platform)} • {selected.target}
                         </div>
                         {statusText ? <div className="text-xs text-muted-foreground">status: {statusText}</div> : null}
-                        <div className="text-xs text-muted-foreground">
-                          receipts: {selected.capabilities.delivery_receipts ? "yes" : "no"} / read:{" "}
-                          {selected.capabilities.read_receipts ? "yes" : "no"} / presence:{" "}
-                          {selected.capabilities.presence ? "yes" : "no"}
-                        </div>
                       </div>
                     </div>
 
@@ -525,27 +522,9 @@ export default function Dashboard() {
                     </div>
                   </div>
 
+                  {/* Session + Start/Stop + Notify */}
                   <div className="flex flex-wrap items-center gap-2 p-3 rounded-lg border">
                     <div className="text-sm font-medium mr-2">Session</div>
-
-                    <div className="w-56">
-                      <Select
-                        value={String(selectedPlatform ?? selected.platform)}
-                        onValueChange={(v) => setSelectedPlatform(v as Platform)}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Platform" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {SUPPORTED_PLATFORMS.map((p) => (
-                            <SelectItem key={p} value={p}>
-                              {p}
-                              {running[selected.id]?.has(p) ? " (running)" : ""}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
 
                     <Badge variant={selectedIsRunning ? "default" : "secondary"}>
                       {selectedIsRunning ? "running" : "stopped"}
@@ -554,10 +533,8 @@ export default function Dashboard() {
                     <div className="flex gap-2 ml-auto">
                       <Button
                         size="sm"
-                        disabled={busy === "start" || !selectedPlatform}
-                        onClick={() =>
-                          withAction("start", "Started tracking.", () => startSelected(selectedPlatform as Platform))
-                        }
+                        disabled={busy === "start"}
+                        onClick={() => withAction("start", "Started tracking.", startSelected)}
                       >
                         {busy === "start" ? "Starting…" : "Start"}
                       </Button>
@@ -565,34 +542,38 @@ export default function Dashboard() {
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={busy === "stop" || !selectedPlatform}
-                        onClick={() =>
-                          withAction("stop", "Stopped tracking.", () => stopSelected(selectedPlatform as Platform))
-                        }
+                        disabled={busy === "stop"}
+                        onClick={() => withAction("stop", "Stopped tracking.", stopSelected)}
                       >
                         {busy === "stop" ? "Stopping…" : "Stop"}
-                      </Button>
-
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={busy === "start_all"}
-                        onClick={() => withAction("start_all", "Started all platforms.", () => startSelected("all"))}
-                      >
-                        {busy === "start_all" ? "Starting…" : "Start all"}
-                      </Button>
-
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={busy === "stop_all"}
-                        onClick={() => withAction("stop_all", "Stopped all platforms.", () => stopSelected("all"))}
-                      >
-                        {busy === "stop_all" ? "Stopping…" : "Stop all"}
                       </Button>
                     </div>
                   </div>
 
+                  {/* Notify toggle */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-lg border">
+                    <div className="text-sm">
+                      <span className="font-medium">Notify me when online:</span>{" "}
+                      <span className="text-muted-foreground">{notifyEnabled ? "enabled" : "disabled"}</span>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant={notifyEnabled ? "default" : "outline"}
+                        disabled={busy === "notify"}
+                        onClick={() =>
+                          withAction("notify", notifyEnabled ? "Notifications disabled." : "Notifications enabled.", () =>
+                            toggleNotifyOnline(!notifyEnabled)
+                          )
+                        }
+                      >
+                        {busy === "notify" ? "Saving…" : notifyEnabled ? "On" : "Off"}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* network confidence + raw/adjusted */}
                   <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-lg border">
                     <div className="text-sm">
                       <span className="font-medium">Network confidence:</span>{" "}
@@ -611,7 +592,7 @@ export default function Dashboard() {
                 </CardContent>
               </Card>
 
-              {/* Live session: devices (full width) above chart (full width) */}
+              {/* Live session: devices above chart */}
               <Card>
                 <CardHeader>
                   <div className="flex items-center justify-between gap-2">
@@ -677,14 +658,13 @@ export default function Dashboard() {
                     )}
                   </div>
 
-                  {/* chart full width */}
+                  {/* chart */}
                   <div className="rounded-lg border p-2">
                     <TrackerChart points={chartPoints} />
                   </div>
 
                   <div className="text-xs text-muted-foreground">
-                    session: {selectedContactId}:{selectedPlatform} • device: {effectiveDeviceId} • points:{" "}
-                    {chartPoints.length}
+                    session: {selectedContactId}:{ONLY_PLATFORM} • device: {effectiveDeviceId} • points: {chartPoints.length}
                   </div>
                 </CardContent>
               </Card>
