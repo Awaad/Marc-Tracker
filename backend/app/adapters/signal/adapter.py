@@ -84,6 +84,34 @@ class SignalAdapter(BaseAdapter):
                 raise RuntimeError("Contact not found for SignalAdapter")
             return c.target
 
+    # async def send_probe(self, *, user_id: int, contact_id: int) -> AdapterProbe:
+    #     if user_id != self.user_id or contact_id != self.contact_id:
+    #         raise RuntimeError("SignalAdapter bound to different user/contact")
+
+    #     recipient = await self._get_recipient()
+    #     probe_id = uuid.uuid4().hex
+    #     sent_at_ms = now_ms()
+
+    #     resp = await self._client.send_text(recipient=recipient, message=f"[probe:{probe_id}] ping")
+
+    #     raw_ts = extract_message_ts(resp)
+    #     msg_ts_ms = normalize_ts_ms(raw_ts, sent_at_ms)
+
+    #     async with SessionLocal() as db:
+    #         await self._repo.insert_probe(
+    #             db,
+    #             user_id=self.user_id,
+    #             contact_id=self.contact_id,
+    #             platform="signal",
+    #             probe_id=probe_id,
+    #             sent_at_ms=sent_at_ms,
+    #             platform_message_ts=msg_ts_ms,
+    #             send_response=resp,
+    #         )
+
+    #     return AdapterProbe(probe_id=probe_id, sent_at_ms=sent_at_ms, platform_message_id=str(msg_ts_ms))
+
+
     async def send_probe(self, *, user_id: int, contact_id: int) -> AdapterProbe:
         if user_id != self.user_id or contact_id != self.contact_id:
             raise RuntimeError("SignalAdapter bound to different user/contact")
@@ -92,10 +120,30 @@ class SignalAdapter(BaseAdapter):
         probe_id = uuid.uuid4().hex
         sent_at_ms = now_ms()
 
-        resp = await self._client.send_text(recipient=recipient, message=f"[probe:{probe_id}] ping")
+        # First, check if we need to send a base message for reactions
+        # Reactions need a message to react to
+        
+        # Option A: React to existing message (if you have one)
+        # Option B: Send invisible message, then react to it
+        
+        # For now, send minimal message
+        message = "\u200B"  # Zero-width space
+        
+        resp = await self._client.send_text(recipient=recipient, message=message)
 
         raw_ts = extract_message_ts(resp)
         msg_ts_ms = normalize_ts_ms(raw_ts, sent_at_ms)
+
+        # If you want to add a reaction too:
+        try:
+            # Send empty reaction (removing reaction) to same timestamp
+            reaction_resp = await self._client.send_reaction(
+                recipient=recipient,
+                target_timestamp=raw_ts,  # React to our own message
+                reaction=""
+            )
+        except:
+            pass  # Reaction not supported or failed
 
         async with SessionLocal() as db:
             await self._repo.insert_probe(
@@ -110,6 +158,9 @@ class SignalAdapter(BaseAdapter):
             )
 
         return AdapterProbe(probe_id=probe_id, sent_at_ms=sent_at_ms, platform_message_id=str(msg_ts_ms))
+
+    
+
 
     async def receipts(self, *, user_id: int, contact_id: int) -> AsyncIterator[AdapterReceipt]:
         if user_id != self.user_id or contact_id != self.contact_id:

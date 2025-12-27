@@ -55,3 +55,31 @@ class SignalRestClient:
         if isinstance(data, dict) and isinstance(data.get("messages"), list):
             return data["messages"]
         return []
+
+
+    
+    async def send_read_receipt(self, recipient: str, timestamp: int) -> dict:
+        """Send a read receipt for a message."""
+        try:
+            response = await self._client.post(
+                f"/v1/receipts/{recipient}",
+                json={
+                    "receiptType": "read",
+                    "timestamp": timestamp,
+                    "recipient": recipient
+                }
+            )
+            
+            if response.status_code == 204:
+                return {
+                    "status": 204,
+                    "success": True,
+                    "message": "Read receipt sent"
+                }
+            
+            return response.json()
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e)
+            }
