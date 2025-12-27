@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 import uuid
-from typing import AsyncIterator
+from typing import AsyncIterator, Any
 
 from sqlalchemy import select
 
@@ -18,19 +18,29 @@ def now_ms() -> int:
     return int(time.time() * 1000)
 
 
-
-def _as_int(v: object) -> int | None:
+def _as_int(v: Any) -> int | None:
     if isinstance(v, (int, float)):
         return int(v)
-    if isinstance(v, str):
-        s = v.strip()
-        if s.isdigit():
-            return int(s)
+    if isinstance(v, str) and v.strip().isdigit():
+        return int(v.strip())
     return None
 
 
+def normalize_ts_ms(ts: int | None, fallback_ms: int) -> int:
+    """
+    Normalize Signal timestamps to milliseconds.
+    Signal sometimes emits seconds (10 digits) vs ms (13 digits).
+    """
+    if ts is None:
+        return fallback_ms
+    # anything below 1e12 is almost certainly seconds in modern epoch time
+    if ts < 1_000_000_000_000:
+        return ts * 1000
+    return ts
+
+
 def extract_message_ts(send_response: dict) -> int | None:
-    # best-effort: shape depends on signal-cli-rest-api version
+    # common locations across versions
     for key in ("timestamp", "messageTimestamp", "sentTimestamp"):
         ts = _as_int(send_response.get(key))
         if ts is not None:
@@ -46,7 +56,6 @@ def extract_message_ts(send_response: dict) -> int | None:
                     return ts
 
     return None
-
 
 
 class SignalAdapter(BaseAdapter):
@@ -66,24 +75,27 @@ class SignalAdapter(BaseAdapter):
         await self._client.close()
         await self._service.unsubscribe(self.user_id, self.contact_id)
 
-    async def send_probe(self, *, user_id: int, contact_id: int) -> AdapterProbe:
-        # guard (engine passes same ids)
-        if user_id != self.user_id or contact_id != self.contact_id:
-            raise RuntimeError("SignalAdapter bound to different user/contact")
-
+    async def _get_recipient(self) -> str:
         async with SessionLocal() as db:
             c = await db.scalar(
                 select(ContactOrm).where(ContactOrm.id == self.contact_id, ContactOrm.user_id == self.user_id)
             )
             if not c:
                 raise RuntimeError("Contact not found for SignalAdapter")
-            recipient = c.target
+            return c.target
 
+    async def send_probe(self, *, user_id: int, contact_id: int) -> AdapterProbe:
+        if user_id != self.user_id or contact_id != self.contact_id:
+            raise RuntimeError("SignalAdapter bound to different user/contact")
+
+        recipient = await self._get_recipient()
         probe_id = uuid.uuid4().hex
-        sent_at = now_ms()
+        sent_at_ms = now_ms()
 
         resp = await self._client.send_text(recipient=recipient, message=f"[probe:{probe_id}] ping")
-        msg_ts = extract_message_ts(resp)
+
+        raw_ts = extract_message_ts(resp)
+        msg_ts_ms = normalize_ts_ms(raw_ts, sent_at_ms)
 
         async with SessionLocal() as db:
             await self._repo.insert_probe(
@@ -92,16 +104,19 @@ class SignalAdapter(BaseAdapter):
                 contact_id=self.contact_id,
                 platform="signal",
                 probe_id=probe_id,
-                sent_at_ms=sent_at,
-                platform_message_ts=msg_ts,
+                sent_at_ms=sent_at_ms,
+                platform_message_ts=msg_ts_ms,
                 send_response=resp,
             )
 
-        return AdapterProbe(probe_id=probe_id, sent_at_ms=sent_at, platform_message_id=str(msg_ts) if msg_ts else None)
+        return AdapterProbe(probe_id=probe_id, sent_at_ms=sent_at_ms, platform_message_id=str(msg_ts_ms))
 
     async def receipts(self, *, user_id: int, contact_id: int) -> AsyncIterator[AdapterReceipt]:
         if user_id != self.user_id or contact_id != self.contact_id:
             raise RuntimeError("SignalAdapter bound to different user/contact")
+
+        # ensure receive loop is running
+        await self._service.start_all()
 
         if self._queue is None:
             self._queue = await self._service.subscribe(self.user_id, self.contact_id)
@@ -109,14 +124,14 @@ class SignalAdapter(BaseAdapter):
         while not self._closed:
             ev = await self._queue.get()
 
-            # IMPORTANT: to keep RTT semantics consistent, yield only "delivery" as ACK.
-            if ev.kind != "delivery":
+            # Treat DELIVERY or READ as ACK for RTT (Signal installs vary)
+            if ev.kind not in ("delivery", "read"):
                 continue
 
             yield AdapterReceipt(
                 probe_id=ev.probe_id,
-                device_id="primary",  # Signal multi-device support can be enhanced later
+                device_id="primary",
                 received_at_ms=ev.when_ms,
-                status="delivered",
+                status="delivered",  # keep semantics: this is our ACK
                 platform_message_id=str(ev.message_ts),
             )

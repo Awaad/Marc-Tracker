@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 import httpx
-
 from app.settings import settings
 
 
 class SignalRestClient:
+    """
+    REST client for signal-cli-rest-api.
+
+    We use:
+      - POST /v2/send for sending probes
+      - GET  /v1/receive/<account> for receiving envelopes in normal/native mode
+
+    In JSON-RPC mode, receive must be done via websocket (/v1/receive/<account>).
+    """
+
     def __init__(self) -> None:
-        self._client = httpx.AsyncClient(base_url=settings.signal_rest_base, timeout=20.0)
+        self._client = httpx.AsyncClient(base_url=settings.signal_rest_base, timeout=35.0)
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -23,4 +32,26 @@ class SignalRestClient:
         }
         r = await self._client.post("/v2/send", json=payload)
         r.raise_for_status()
+        # response is usually JSON with timestamp-ish fields (varies by version)
         return r.json()
+
+    async def receive_http_once(self) -> list[dict]:
+        """
+        Normal/native mode polling endpoint.
+        Returns a list of envelopes/messages (shape depends on version).
+        """
+        if not settings.signal_account:
+            raise RuntimeError("SIGNAL_ACCOUNT missing")
+
+        # Many installs expose: GET /v1/receive/<number>
+        r = await self._client.get(f"/v1/receive/{settings.signal_account}")
+        r.raise_for_status()
+
+        # Some versions return [] when no messages.
+        data = r.json()
+        if isinstance(data, list):
+            return data
+        # Some versions wrap it
+        if isinstance(data, dict) and isinstance(data.get("messages"), list):
+            return data["messages"]
+        return []

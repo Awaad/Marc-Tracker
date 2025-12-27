@@ -50,6 +50,11 @@ class Correlator:
         # (user, contact, platform, probe_id) -> sent_ms
         self._probe_sent_at: dict[tuple[int, int, str, str], int] = {}
 
+        self._timed_out_sent_at: dict[tuple[int, int, str, str], int] = {}
+        self._timed_out_at_ms: dict[tuple[int, int, str, str], int] = {}
+        self._late_window_ms = 120_000
+
+
     def is_probe_pending(self, user_id: int, contact_id: int, platform: str, probe_id: str) -> bool:
         return (user_id, contact_id, platform, probe_id) in self._probe_sent_at
 
@@ -73,7 +78,11 @@ class Correlator:
         - escalates to offline if streak >= 2
         """
         key = (user_id, contact_id, platform, probe_id)
-        self._probe_sent_at.pop(key, None)
+        sent_at = self._probe_sent_at.pop(key, None)
+
+        if sent_at is not None:
+            self._timed_out_sent_at[key] = sent_at
+            self._timed_out_at_ms[key] = now_ms()
 
         cm = self._by_session.setdefault((user_id, contact_id, platform), ContactMetrics())
         dm = cm.devices.setdefault(device_id, DeviceMetrics())
@@ -114,9 +123,17 @@ class Correlator:
         received_at_ms: int,
     ) -> dict | None:
         key = (user_id, contact_id, platform, probe_id)
+
         sent_at = self._probe_sent_at.pop(key, None)
         if sent_at is None:
-            return None
+                    sent_at = self._timed_out_sent_at.pop(key, None)
+                    to_at = self._timed_out_at_ms.pop(key, None)
+                    # expire old timed-out probes
+                    if to_at is not None and now_ms() - to_at > self._late_window_ms:
+                        sent_at = None
+
+        if sent_at is None:
+                return None
 
         rtt = float(max(0, received_at_ms - sent_at))
         cm = self._by_session.setdefault((user_id, contact_id, platform), ContactMetrics())
