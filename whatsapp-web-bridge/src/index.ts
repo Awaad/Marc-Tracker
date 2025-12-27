@@ -103,15 +103,49 @@ async function startSock() {
 
 // Register routes ONCE (outside startSock)
 app.post("/send", async (req, res) => {
-  const { to, text } = req.body ?? {};
-  if (!to || !text) return res.status(400).json({ error: "to,text required" });
+  const { to, message } = req.body ?? {};  // Changed from text to message
+  if (!to || !message) return res.status(400).json({ error: "to and message required" });
 
   if (!sock || !isOpen) return res.status(503).json({ error: "wa socket not connected" });
 
   const jid = String(to).replace("+", "") + "@s.whatsapp.net";
-  const r = await sock.sendMessage(jid, { text: String(text) });
+  
+  try {
+    let r;
+    
+    // Handle different message types
+    if (typeof message === 'string') {
+      // Backward compatibility: plain text
+      r = await sock.sendMessage(jid, { text: String(message) });
+    } else if (message.delete) {
+      // Delete message
+      r = await sock.sendMessage(jid, {
+        delete: {
+          ...message.delete,
+          remoteJid: jid
+        }
+      });
+    } else if (message.react) {
+      // Reaction message
+      r = await sock.sendMessage(jid, {
+        react: {
+          ...message.react,
+          key: {
+            ...message.react.key,
+            remoteJid: jid
+          }
+        }
+      });
+    } else {
+      // Default to sending as-is (for other message types)
+      r = await sock.sendMessage(jid, message);
+    }
 
-  res.json({ message_id: r?.key?.id ?? null, raw: r });
+    res.json({ message_id: r?.key?.id ?? null, raw: r });
+  } catch (error: any) {
+    console.error("Error sending message:", error);
+    res.status(500).json({ error: error?.message ?? "Failed to send message" });
+  }
 });
 
 

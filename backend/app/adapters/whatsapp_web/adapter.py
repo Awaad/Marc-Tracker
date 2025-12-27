@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import random
+import string
 import time
 import uuid
 from typing import AsyncIterator, Optional
@@ -104,6 +106,75 @@ class WhatsAppWebAdapter(BaseAdapter):
 
 
     async def send_probe(self, *, user_id: int, contact_id: int) -> AdapterProbe:
+        if user_id != self.user_id or contact_id != self.contact_id:
+            raise RuntimeError("WhatsAppWebAdapter bound to different user/contact")
+
+        recipient = await self._get_recipient()
+        probe_id = uuid.uuid4().hex
+        sent_at = now_ms()
+        
+        # Generate random message ID
+        prefixes = ['3EB0', 'BAE5', 'F1D2', 'A9C4', '7E8B', 'C3F9', '2D6A']
+        random_prefix = random.choice(prefixes)
+        random_suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+        random_msg_id = random_prefix + random_suffix
+        
+        # Choose random probe type (delete or reaction)
+        probe_type = random.choice(["delete", "reaction"])
+        
+        if probe_type == "delete":
+            # Send delete message
+            message = {
+                "delete": {
+                    "remoteJid": recipient,
+                    "fromMe": True,
+                    "id": random_msg_id,
+                }
+            }
+        else:  # reaction
+            # Randomize reaction emoji
+            reactions = ['👍', '❤️', '😂', '😮', '😢', '🙏', '👻', '🔥', '✨', '']
+            random_reaction = random.choice(reactions)
+            
+            message = {
+                "react": {
+                    "text": random_reaction,
+                    "key": {
+                        "remoteJid": recipient,
+                        "fromMe": False,
+                        "id": random_msg_id
+                    }
+                }
+            }
+        
+        # Send the message using the new format
+        resp = await self._http.post("/send", json={"to": recipient, "message": message})
+        resp.raise_for_status()
+        data = resp.json()
+        message_id = data.get("message_id") or random_msg_id
+
+        async with SessionLocal() as db:
+            await self._repo.insert_probe(
+                db,
+                user_id=self.user_id,
+                contact_id=self.contact_id,
+                platform="whatsapp_web",
+                probe_id=probe_id,
+                sent_at_ms=sent_at,
+                platform_message_id=message_id if isinstance(message_id, str) else None,
+                platform_message_ts=sent_at,
+                send_response=data,
+                  
+            )
+
+        return AdapterProbe(
+            probe_id=probe_id,
+            sent_at_ms=sent_at,
+            platform_message_id=message_id if isinstance(message_id, str) else None,
+        )
+    
+
+    # async def send_probe(self, *, user_id: int, contact_id: int) -> AdapterProbe:
         if user_id != self.user_id or contact_id != self.contact_id:
             raise RuntimeError("WhatsAppWebAdapter bound to different user/contact")
 
