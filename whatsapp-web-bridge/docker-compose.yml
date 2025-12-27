@@ -1,0 +1,60 @@
+services:
+  caddy:
+    image: caddy:alpine
+    depends_on:
+      - backend
+      - frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+    env_file:
+      - ./backend/.env
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////data/activity_tracker.db
+
+      # WhatsApp bridge internal address
+      - WHATSAPP_WEB_ENABLED=true
+      - WHATSAPP_WEB_BRIDGE_BASE=http://whatsapp-web-bridge:8099
+      - WHATSAPP_WEB_BRIDGE_WS=ws://whatsapp-web-bridge:8099/events
+
+      
+    volumes:
+      - backend_db:/data
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE: /api
+        VITE_WS_BASE: /ws
+    expose:
+      - "80"
+    restart: unless-stopped
+
+  whatsapp-web-bridge:
+    build:
+      context: ./whatsapp-web-bridge
+    volumes:
+      # persist baileys auth
+      - wa_auth:/app/auth
+    expose:
+      - "8099"
+    restart: unless-stopped
+
+volumes:
+  backend_db:
+  wa_auth:
+  caddy_data:
+  caddy_config:
