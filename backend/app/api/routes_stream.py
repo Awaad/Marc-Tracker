@@ -40,10 +40,13 @@ async def _auth_ws_and_load_user(ws: WebSocket) -> User:
 def coerce_platform(raw) -> Platform:
     if isinstance(raw, Platform):
         return raw
-    if isinstance(raw, str):
-        return Platform(raw)
-    # fallback: stringify
-    return Platform(str(raw))
+    s = str(raw)
+    if s.startswith("Platform."):
+        s = s.split(".", 1)[1]
+    try:
+        return Platform(s)
+    except Exception:
+        return Platform.whatsapp_web
 
 
 @router.websocket("/ws")
