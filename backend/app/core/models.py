@@ -77,6 +77,8 @@ class Contact(BaseModel):
     platform_meta: dict[str, Any] = {}
     capabilities: Capabilities
     notify_online: bool = False
+    notify_last_state: str | None = None
+    notify_last_sent_at_ms: int | None = None
 
 
 class ContactSnapshot(BaseModel):

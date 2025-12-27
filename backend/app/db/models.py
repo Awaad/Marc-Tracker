@@ -29,7 +29,8 @@ class Contact(Base):
     avatar_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     platform_meta_json: Mapped[str] = mapped_column(Text, default="{}")
     notify_online: Mapped[bool] = mapped_column(Boolean, default=False)
-
+    notify_last_state: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    notify_last_sent_at_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     user: Mapped["User"] = relationship()
 
