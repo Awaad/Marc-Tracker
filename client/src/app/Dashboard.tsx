@@ -352,8 +352,7 @@ export default function Dashboard() {
               src="/lyrics/gibmirdeinfinger.txt"
               autoPlay
               loop
-              defaultLinesPerMinute={12}
-              fadeMs={450}
+              linesPerMinute={12}
             />
           </div>
         <Button variant="outline" onClick={logout}>
