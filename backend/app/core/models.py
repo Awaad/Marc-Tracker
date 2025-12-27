@@ -76,6 +76,7 @@ class Contact(BaseModel):
     avatar_url: str | None = None
     platform_meta: dict[str, Any] = {}
     capabilities: Capabilities
+    notify_online: bool = False
 
 
 class ContactSnapshot(BaseModel):

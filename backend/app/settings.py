@@ -37,6 +37,14 @@ class Settings(BaseSettings):
     whatsapp_web_bridge_base: str = "http://localhost:8099"
     whatsapp_web_bridge_ws: str = "ws://localhost:8099/events"
 
+
+    SMTP_HOST: str = "smtp.emailit.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: str = "emailit"
+    SMTP_PASS: str = "3OBhqpXA9efW7A"
+    SMTP_FROM: str = "example@example.com"
+    ADMIN_NOTIFY_EMAIL: str = "example@gmail.com"
+
     def signal_ws_url(self) -> str:
         base = self.signal_rest_base.replace("https://", "wss://").replace("http://", "ws://")
         # websocket receive endpoint

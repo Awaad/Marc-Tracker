@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 import json
+from pydantic import BaseModel
 
 from app.auth.deps import get_current_user, get_db
 from app.core.models import ContactCreate
@@ -34,6 +35,7 @@ async def list_contacts(
                 avatar_url=c.avatar_url,
                 platform_meta=json.loads(c.platform_meta_json or "{}"),
                 capabilities=capabilities_for(plat),
+                notify_online=bool(getattr(c, "notify_online", False)),
             )
         )
     return out
@@ -67,6 +69,8 @@ async def create_contact(
         avatar_url=c.avatar_url,
         platform_meta=json.loads(c.platform_meta_json or "{}"),
         capabilities=capabilities_for(payload.platform),
+        notify_online=bool(getattr(c, "notify_online", False)),
+
     )
 
 
@@ -138,3 +142,21 @@ async def delete_contact(
     await db.delete(c)
     await db.commit()
     return {"ok": True}
+
+
+class NotifyOnlineIn(BaseModel):
+    enabled: bool
+
+@router.post("/{contact_id}/notify_online")
+async def set_notify_online(
+    contact_id: int,
+    payload: NotifyOnlineIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    c = await db.scalar(select(ContactOrm).where(ContactOrm.id == contact_id, ContactOrm.user_id == user.id))
+    if not c:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    c.notify_online = bool(payload.enabled)
+    await db.commit()
+    return {"ok": True, "enabled": c.notify_online}

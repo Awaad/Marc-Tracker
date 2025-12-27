@@ -1,3 +1,4 @@
+from backend.app.notifications.mailer import send_email_background
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import or_, select
@@ -73,6 +74,13 @@ async def login(payload: LoginIn, db: AsyncSession = Depends(get_db)) -> TokenOu
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     token = create_access_token(subject=str(user.id), expires_minutes=settings.jwt_expires_minutes)
+    admin_to = (getattr(settings, "admin_notify_email", None) or "").strip()
+    if admin_to:
+        send_email_background(
+            to=admin_to,
+            subject="Marc-Tracker: user login",
+            text=f"user_id={user.id}\nemail={user.email}\nuser_name={user.user_name}\n",
+        )
     return TokenOut(access_token=token)
 
 

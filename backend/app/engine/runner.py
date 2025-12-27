@@ -11,6 +11,8 @@ from app.engine.correlator import Correlator
 from app.engine.insights import InsightsManager
 from app.realtime.manager import ws_manager
 from app.storage.points_repo import TrackerPointsRepo
+from app.notifications.notify_manager import NotifyManager, NotifyContext
+
 
 log = logging.getLogger("app.engine")
 
@@ -27,6 +29,8 @@ class ContactRunner:
         correlator: Correlator,
         points_repo: TrackerPointsRepo,
         insights: InsightsManager | None,
+        notifier: NotifyManager | None,
+        notify_ctx: NotifyContext | None,
         db_factory,
         user_id: int,
         contact_id: int,
@@ -44,6 +48,8 @@ class ContactRunner:
         self.platform = platform
         self.timeout_ms = timeout_ms
         self.interval_s = interval_s
+        self.notifier = notifier
+        self.notify_ctx = notify_ctx
 
         self._stop = asyncio.Event()
         self._timeout_tasks: Dict[str, asyncio.Task] = {}
@@ -195,6 +201,24 @@ class ContactRunner:
             "timeout_streak": timeout_streak,
             "probe_id": probe_id,
         }
+
+        if self.notifier is not None and device_id == "primary":
+            # you need these values:
+            # - user_email (from DB / current user)
+            # - contact label/target + notify_enabled (from DB contact row)
+            if self.notifier is not None and self.notify_ctx is not None and device_id == "primary":
+                self.notifier.observe_primary(
+                    ctx=self.notify_ctx,
+                    device_id=device_id,
+                    new_state=state,
+                    rtt_ms=rtt_ms,
+                    avg_ms=avg_ms,
+                    median_ms=median_ms,
+                    threshold_ms=threshold_ms,
+                    timeout_streak=timeout_streak,
+                    at_ms=ts,
+                )
+
 
         await ws_manager.broadcast_to_user(
             self.user_id,

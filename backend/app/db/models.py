@@ -1,4 +1,4 @@
-from sqlalchemy import String, Integer, Float, ForeignKey, Text, Index, BigInteger, JSON
+from sqlalchemy import String, Integer, Float, ForeignKey, Text, Index, BigInteger, JSON, Boolean
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -28,6 +28,8 @@ class Contact(Base):
     display_number: Mapped[str] = mapped_column(String(64), default="")
     avatar_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     platform_meta_json: Mapped[str] = mapped_column(Text, default="{}")
+    notify_online: Mapped[bool] = mapped_column(Boolean, default=False)
+
 
     user: Mapped["User"] = relationship()
 

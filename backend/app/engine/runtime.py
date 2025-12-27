@@ -7,6 +7,7 @@ from app.engine.classifier import ClassifierV1
 from app.engine.correlator import Correlator
 from app.engine.insights import InsightsManager
 from app.storage.points_repo import TrackerPointsRepo
+from backend.app.notifications.notify_manager import NotifyManager
 
 
 log = logging.getLogger("app.engine")
@@ -23,6 +24,7 @@ class EngineRuntime:
 
        
         self.insights = InsightsManager(window_size=600, broadcast_interval_ms=2000)
+        self.notifier = NotifyManager()
 
         self._consumer_task: asyncio.Task[None] | None = None
 

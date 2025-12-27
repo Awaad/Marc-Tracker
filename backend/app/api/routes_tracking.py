@@ -1,5 +1,7 @@
 from contextlib import asynccontextmanager
 
+from backend.app import settings
+from backend.app.notifications.mailer import send_email_background
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +11,8 @@ from app.db.models import Contact as ContactOrm, User
 from app.db.session import SessionLocal
 from app.engine.runtime import engine_runtime
 from app.engine.runner import ContactRunner
+
+from app.notifications.notify_manager import NotifyManager, NotifyContext
 
 from app.adapters.hub import adapter_hub
 from app.core.capabilities import Platform
@@ -97,15 +101,27 @@ async def start_tracking(
         async def runner(p: Platform = plat) -> None:
             adapter = adapter_hub.create(p, user.id, contact.id)
             try:
+                notify_ctx = NotifyContext(
+                    user_id=user.id,
+                    user_email=user.email,
+                    contact_id=contact.id,
+                    contact_label=(contact.display_name or contact.target),
+                    contact_target=contact.target,
+                    platform=p.value,  
+                    notify_enabled=bool(getattr(contact, "notify_online", False)),
+                )
+
                 cr = ContactRunner(
                     adapter=adapter,
                     correlator=engine_runtime.correlator,
                     points_repo=engine_runtime.points_repo,
                     insights=engine_runtime.insights,
+                    notifier=getattr(engine_runtime, "notifier", None),
+                    notify_ctx=notify_ctx,
                     db_factory=session_scope,
                     user_id=user.id,
                     contact_id=contact.id,
-                    platform=p.value,          
+                    platform=p.value,  
                     timeout_ms=10_000,
                 )
                 await cr.run()
@@ -113,6 +129,13 @@ async def start_tracking(
                 await adapter.close()
 
         await engine_runtime.tracking.start_platform(user.id, contact.id, plat.value, runner)
+        admin_to = (getattr(settings, "admin_notify_email", None) or "").strip()
+        if admin_to:
+            send_email_background(
+                to=admin_to,
+                subject="Marc-Tracker: tracking started",
+                text=f"user_id={user.id}\ncontact_id={contact.id}\nplatform={plat.value}\n",
+            )
         started.append(plat.value)
 
     return {"ok": True, "started": started}
