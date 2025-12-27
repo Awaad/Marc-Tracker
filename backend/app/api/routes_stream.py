@@ -81,9 +81,10 @@ async def ws_endpoint(ws: WebSocket) -> None:
             await ws.send_text(json.dumps({"type": "contacts:init", "contacts": contacts}))
 
             while True:
-                msg = await ws.receive()
-                if msg["type"] == "websocket.disconnect":
-                    break
+                text = await ws.receive_text()
+                if text == "ping":
+                    await ws.send_text("pong")
+                    continue
 
     except WebSocketDisconnect:
         pass
