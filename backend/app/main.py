@@ -31,32 +31,38 @@ def create_app() -> FastAPI:
         swagger_ui_parameters={"persistAuthorization": True},
     )
 
+    @app.on_event("startup")
+    async def _startup() -> None:
+        fp = hashlib.sha256(settings.jwt_secret.encode("utf-8")).hexdigest()[:8]
+        log.info("jwt config", extra={"jwt_alg": settings.jwt_algorithm, "jwt_secret_fp": fp})
+        register_adapters()
+        await adapter_hub.init_all()
+        await engine_runtime.start()
+
+    @app.on_event("shutdown")
+    async def _shutdown() -> None:
+        await engine_runtime.stop()
+        await adapter_hub.shutdown_all()
+
+    origins = settings.CORS_ALLOW_ORIGINS
+    allow_credentials = False if "*" in origins else True
+
     app.add_middleware(RequestIdMiddleware)
     app.add_middleware(AccessLogMiddleware)
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[settings.cors_allow_origins],
-        allow_credentials=True,
+        allow_origins=origins,
+        allow_credentials=allow_credentials,
         allow_methods=["*"],
-    allow_headers=["*"],
+        allow_headers=["*"],
 )
 
     app.include_router(api_router)
     return app
 
+
+
 app = create_app()
 
 
-@app.on_event("startup")
-async def _startup() -> None:
-    fp = hashlib.sha256(settings.jwt_secret.encode("utf-8")).hexdigest()[:8]
-    log.info("jwt config", extra={"jwt_alg": settings.jwt_algorithm, "jwt_secret_fp": fp})
-    register_adapters()
-    await adapter_hub.init_all()
-    await engine_runtime.start()
-
-@app.on_event("shutdown")
-async def _shutdown() -> None:
-    await engine_runtime.stop()
-    await adapter_hub.shutdown_all()

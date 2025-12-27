@@ -1,4 +1,6 @@
-from backend.app.notifications.mailer import send_email_background
+import asyncio
+from fastapi import Request
+from app.notifications.mailer import send_email_background
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import or_, select
@@ -7,8 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.deps import get_current_user, get_db
 from app.auth.security import create_access_token, hash_password, verify_password
 from app.db.models import User
-
+from app.engine.runtime import engine_runtime
 from app.settings import settings
+
+from app.notifications.admin_notify import notify_admin_login
+import time
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -66,21 +71,17 @@ async def register(payload: RegisterIn, db: AsyncSession = Depends(get_db)) -> T
 
 
 @router.post("/login", response_model=TokenOut)
-async def login(payload: LoginIn, db: AsyncSession = Depends(get_db)) -> TokenOut:
+async def login(payload: LoginIn, request: Request, db: AsyncSession = Depends(get_db)) -> TokenOut:
     user = await db.scalar(
         select(User).where(or_(User.email == payload.identifier, User.user_name == payload.identifier))
     )
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
+    
+    
     token = create_access_token(subject=str(user.id), expires_minutes=settings.jwt_expires_minutes)
-    admin_to = (getattr(settings, "admin_notify_email", None) or "").strip()
-    if admin_to:
-        send_email_background(
-            to=admin_to,
-            subject="Marc-Tracker: user login",
-            text=f"user_id={user.id}\nemail={user.email}\nuser_name={user.user_name}\n",
-        )
+    notify_admin_login(user_email=user.email, user_id=user.id, when_ms=int(time.time() * 1000))
     return TokenOut(access_token=token)
 
 

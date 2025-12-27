@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     app_name: str = "Marc-Tracker"
     app_version: str = "0.1.0"
     env: str = "dev"
-    cors_allow_origins: str = [
+    CORS_ALLOW_ORIGINS: list[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ]
@@ -38,12 +38,15 @@ class Settings(BaseSettings):
     whatsapp_web_bridge_ws: str = "ws://localhost:8099/events"
 
 
-    SMTP_HOST: str = "smtp.emailit.com"
-    SMTP_PORT: int = 587
-    SMTP_USER: str = "emailit"
-    SMTP_PASS: str = "3OBhqpXA9efW7A"
-    SMTP_FROM: str = "example@example.com"
-    ADMIN_NOTIFY_EMAIL: str = "example@gmail.com"
+    smtp_host: str | None = Field(default=None, validation_alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, validation_alias="SMTP_PORT")
+    smtp_user: str | None = Field(default=None, validation_alias="SMTP_USER")
+    smtp_pass: str | None = Field(default=None, validation_alias="SMTP_PASS")
+    smtp_tls: bool = Field(default=True, validation_alias="SMTP_TLS")
+    smtp_from: str | None = Field(default=None, validation_alias="SMTP_FROM")
+
+    # Admin notifications
+    admin_notify_email: str | None = Field(default=None, validation_alias="ADMIN_NOTIFY_EMAIL")
 
     def signal_ws_url(self) -> str:
         base = self.signal_rest_base.replace("https://", "wss://").replace("http://", "ws://")
