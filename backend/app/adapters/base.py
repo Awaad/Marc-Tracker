@@ -28,7 +28,7 @@ class BaseAdapter(ABC):
     - send_probe() sends a probe and returns a probe_id (and optionally platform message id).
     - receipts() yields AdapterReceipt for receipts/status updates.
 
-    Optional extensions:
+    extensions:
     - get_profile(): return display/avatar/status when supported
     - get_presence(): return presence string when supported
     """
@@ -43,7 +43,7 @@ class BaseAdapter(ABC):
 
     async def get_profile(self, *, user_id: int, contact_id: int) -> Optional[dict]:
         """
-        Optional: returns dict with any of:
+         returns dict with any of:
           - display_name: str
           - avatar_url: str
           - status_text: str
@@ -53,7 +53,7 @@ class BaseAdapter(ABC):
 
     async def get_presence(self, *, user_id: int, contact_id: int) -> Optional[str]:
         """
-        Optional: returns a presence string like:
+        returns a presence string like:
           'online' | 'offline' | 'unknown' | ...
         Return None if unsupported.
         """
