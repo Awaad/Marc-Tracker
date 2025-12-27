@@ -15,10 +15,9 @@ export default function App() {
     <BrowserRouter>
       {!token ? (
         <>
-          <div className="p-4 flex gap-4">
+          {/* <div className="p-4 flex gap-4">
             <Link className="underline" to="/">Login</Link>
-            <Link className="underline" to="/register">Register</Link>
-          </div>
+          </div> */}
           <Routes>
             <Route path="/" element={<Login />} />
             {/* <Route path="/register" element={<Register />} /> */}
