@@ -164,6 +164,53 @@ export function LyricsNowPlaying({
           : "No lyrics (check src path)"
         : text;
 
+
+  const outerRef = React.useRef<HTMLSpanElement | null>(null);
+  const innerRef = React.useRef<HTMLSpanElement | null>(null);
+
+  const [needsScroll, setNeedsScroll] = React.useState(false);
+  const [scrollPx, setScrollPx] = React.useState(0);
+
+  // stable unique animation name per component instance
+  const animName = React.useId().replace(/[:]/g, "");
+
+  const reduceMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // Measure overflow whenever the displayed text changes (or size changes)
+  React.useLayoutEffect(() => {
+    const measure = () => {
+      const outer = outerRef.current;
+      const inner = innerRef.current;
+      if (!outer || !inner) return;
+
+      // Reset any previous transform so measurements are accurate
+      inner.style.transform = "translateX(0px)";
+
+      const ow = outer.clientWidth;
+      const iw = inner.scrollWidth;
+
+      const overflow = Math.max(0, iw - ow);
+      setNeedsScroll(overflow > 4); // small tolerance
+      setScrollPx(overflow);
+    };
+
+    measure();
+
+    // Re-measure on resize
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    if (ro && outerRef.current) ro.observe(outerRef.current);
+
+    window.addEventListener("resize", measure);
+    return () => {
+      window.removeEventListener("resize", measure);
+      ro?.disconnect();
+    };
+  }, [displayText]);
+
+
   return (
     <Card className={["rounded-xl border bg-card/50 px-2 py-1 shadow-sm", className].join(" ")}>
       <div className="flex items-center gap-2">
@@ -187,8 +234,9 @@ export function LyricsNowPlaying({
           aria-label="Lyrics ticker"
           title={hidden ? "" : displayText}
         >
-          <span
-            className="block truncate text-sm text-muted-foreground"
+                    <span
+            ref={outerRef}
+            className="block overflow-hidden text-sm text-muted-foreground"
             style={{
               opacity: hidden || lines.length === 0 ? 1 : opacity,
               transition: `opacity ${fadeMs}ms ease`,
@@ -196,8 +244,37 @@ export function LyricsNowPlaying({
               maskImage: mask,
             }}
           >
-            {displayText || "\u00A0"}
+            {/* keyframes only matter if we actually need to scroll */}
+            {needsScroll && !reduceMotion ? (
+              <style>{`
+                @keyframes lyrics-marquee-${animName} {
+                  0%   { transform: translateX(0px); }
+                  10%  { transform: translateX(0px); }  /* hold at start */
+                  90%  { transform: translateX(-${scrollPx}px); }
+                  100% { transform: translateX(-${scrollPx}px); } /* hold at end */
+                }
+              `}</style>
+            ) : null}
+
+            <span
+              ref={innerRef}
+              className="inline-block whitespace-nowrap will-change-transform"
+              style={{
+                // Only animate if it overflows and we’re actively “playing” and visible
+                animation:
+                  !hidden && playing && needsScroll && !reduceMotion
+                    ? `lyrics-marquee-${animName} ${Math.max(
+                        2.5,
+                        // speed-based duration, but cap so it fits into your line interval nicely
+                        Math.min(scrollPx / 40, Math.max(2.5, intervalMs / 1000 - 0.6))
+                      )}s linear infinite`
+                    : undefined,
+              }}
+            >
+              {displayText || "\u00A0"}
+            </span>
           </span>
+
         </button>
 
         <Button
