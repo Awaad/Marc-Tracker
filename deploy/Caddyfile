@@ -3,7 +3,11 @@ gibmirdeinfinger.com {
 
   # WebSocket: /ws?token=...
   @ws path /ws*
-  reverse_proxy @ws backend:8000
+  reverse_proxy @ws backend:8000 {
+   header_up X-Forwarded-Proto {scheme}
+   header_up X-Forwarded-For {remote_host}
+   header_up X-Forwarded-Host {host}
+  }	
 
   # Backend REST routes (no /api prefix)
   @api path /auth/* /contacts* /tracking* /netvitals* /health* /docs* /openapi.json
