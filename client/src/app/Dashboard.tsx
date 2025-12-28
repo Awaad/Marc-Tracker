@@ -343,22 +343,27 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen p-6">
       {/* header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <h1 className="text-2xl font-semibold">Marc-Tracker</h1>
         </div>
-        <div className="mt-2">
-            <LyricsNowPlaying
-              src="/lyrics/gibmirdeinfinger.txt"
-              autoPlay
-              loop
-              linesPerMinute={12}
-            />
-          </div>
-        <Button variant="outline" onClick={logout}>
-          Logout
-        </Button>
+
+        {/* right side: lyrics + logout */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+          <LyricsNowPlaying
+            src="/lyrics/gibmirdeinfinger.txt"
+            autoPlay
+            loop
+            linesPerMinute={12}
+            className="w-full sm:w-80 md:w-96 min-w-0"
+          />
+
+          <Button className="w-full sm:w-auto" variant="outline" onClick={logout}>
+            Logout
+          </Button>
+        </div>
       </div>
+
 
       {/* 2 columns: contacts | right stack */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
@@ -488,20 +493,21 @@ export default function Dashboard() {
               {/* contact overview + controls */}
               <Card>
                 <CardContent className="p-4 space-y-3">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-center gap-3">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="flex items-center gap-3 min-w-0">
                       <Avatar url={selected.avatar_url} label={selected.display_name || selected.target} />
-                      <div>
-                        <div className="text-lg font-semibold">{selected.display_name || selected.target}</div>
-                        <div className="text-sm text-muted-foreground">
+                      <div className="min-w-0">
+                        <div className="text-lg font-semibold truncate">{selected.display_name || selected.target}</div>
+                        <div className="text-sm text-muted-foreground truncate">
                           {platformLabel(selected.platform)} • {selected.target}
                         </div>
-                        {statusText ? <div className="text-xs text-muted-foreground">status: {statusText}</div> : null}
+                        {statusText ? <div className="text-xs text-muted-foreground truncate">status: {statusText}</div> : null}
                       </div>
                     </div>
 
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2 sm:justify-end">
                       <Button
+                        className="w-full sm:w-auto"
                         size="sm"
                         variant="outline"
                         disabled={busy === "refresh_profile"}
@@ -511,6 +517,7 @@ export default function Dashboard() {
                       </Button>
 
                       <Button
+                        className="w-full sm:w-auto"
                         size="sm"
                         variant="destructive"
                         disabled={busy === "delete"}
@@ -520,6 +527,7 @@ export default function Dashboard() {
                       </Button>
                     </div>
                   </div>
+
 
                   {/* Session + Start/Stop + Notify */}
                   <div className="flex flex-wrap items-center gap-2 p-3 rounded-lg border">
@@ -621,7 +629,8 @@ export default function Dashboard() {
                   {/* devices */}
                   <div>
                     {selectedSnapshot ? (
-                      <Table>
+                      <div className="overflow-x-auto">
+                      <Table className="min-w-[720px]">
                         <TableHeader>
                           <TableRow>
                             <TableHead>Device</TableHead>
@@ -652,6 +661,7 @@ export default function Dashboard() {
                           })}
                         </TableBody>
                       </Table>
+                      </div>
                     ) : (
                       <p className="text-sm text-muted-foreground">No snapshot yet (start tracking)</p>
                     )}

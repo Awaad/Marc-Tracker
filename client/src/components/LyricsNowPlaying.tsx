@@ -165,7 +165,7 @@ export function LyricsNowPlaying({
         : text;
 
   return (
-    <Card className={["w-full rounded-xl border bg-card/50 px-2 py-1 shadow-sm", className].join(" ")}>
+    <Card className={["rounded-xl border bg-card/50 px-2 py-1 shadow-sm", className].join(" ")}>
       <div className="flex items-center gap-2">
         <Button
           type="button"
