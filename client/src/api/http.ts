@@ -15,6 +15,39 @@ export function setToken(token: string | null) {
   else localStorage.setItem("token", token);
 }
 
+async function extractErrorMessage(res: Response): Promise<string> {
+  try {
+    const data: any = await res.clone().json();
+
+    if (res.status === 422 && Array.isArray(data?.detail)) {
+      return data.detail
+        .map((d: any) => {
+          const loc = Array.isArray(d.loc) ? d.loc : [];
+          const field = loc.length ? String(loc[loc.length - 1]) : "field";
+          return `${field}: ${d.msg ?? "Invalid value"}`;
+        })
+        .join("\n");
+    }
+
+    if (typeof data?.detail === "string") return data.detail;
+
+    // If we ever send structured detail: { detail: { message: "..." } }
+    if (typeof data?.detail?.message === "string") return data.detail.message;
+
+    if (typeof data?.message === "string") return data.message;
+  } catch {
+    // not JSON
+  }
+
+  // Fallback to plain text
+  try {
+    const text = await res.text();
+    if (text) return text;
+  } catch {}
+
+  return res.statusText || `Request failed (${res.status})`;
+}
+
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers = new Headers(init.headers || {});
@@ -23,9 +56,11 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
 
   const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`HTTP ${res.status}: ${text}`);
+    const msg = await extractErrorMessage(res);
+    throw new Error(msg);
   }
+  if (res.status === 204) return undefined as T;
+  
   return (await res.json()) as T;
 }
 
